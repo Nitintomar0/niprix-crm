@@ -60,6 +60,46 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "test_user")
         self.assertEqual(response.data["role"], "EMPLOYEE")
+    
+    def test_logout_blacklists_refresh_token(self):
+        login_response = self.client.post(
+            reverse("token_obtain_pair"),
+            {
+                "username": "test_user",
+                "password": "TestPassword123!",
+            },
+            format="json",
+        )
+
+        refresh_token = login_response.data["refresh"]
+
+        self.client.force_authenticate(user=self.user)
+
+        logout_response = self.client.post(
+            reverse("logout"),
+            {
+                "refresh": refresh_token,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            logout_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        refresh_response = self.client.post(
+            reverse("token_refresh"),
+            {
+                "refresh": refresh_token,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            refresh_response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
         
 
 class RBACPermissionTests(APITestCase):
