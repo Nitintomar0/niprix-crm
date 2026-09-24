@@ -15,6 +15,13 @@ class User(AbstractUser):
         choices=Role.choices,
         default=Role.EMPLOYEE,
     )
+    company = models.ForeignKey(
+        "organizations.Company",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users",
+    )
 
     def __str__(self):
         return f"{self.username} ({self.role})"
