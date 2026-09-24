@@ -4,6 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import User
 
@@ -59,3 +60,32 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "test_user")
         self.assertEqual(response.data["role"], "EMPLOYEE")
+        
+
+class RBACPermissionTests(APITestCase):
+    def setUp(self):
+        self.ceo = User.objects.create_user(
+            username="test_ceo",
+            password="TestPassword123!",
+            role=User.Role.CEO,
+        )
+
+        self.employee = User.objects.create_user(
+            username="test_employee",
+            password="TestPassword123!",
+            role=User.Role.EMPLOYEE,
+        )
+
+    def test_ceo_can_access_dashboard(self):
+        self.client.force_authenticate(user=self.ceo)
+
+        response = self.client.get("/api/auth/ceo-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_employee_cannot_access_dashboard(self):
+        self.client.force_authenticate(user=self.employee)
+
+        response = self.client.get("/api/auth/ceo-dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

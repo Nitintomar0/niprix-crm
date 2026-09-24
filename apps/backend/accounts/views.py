@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from .permissions import IsCEO
 
 
 class MeView(APIView):
@@ -38,3 +39,13 @@ class LogoutView(APIView):
             {"detail": "Logout successful."},
             status=200,
         )
+        
+class CEODashboardView(APIView):
+    permission_classes = [IsCEO]
+
+    def get(self, request):
+        return Response({
+            "message": "CEO dashboard access granted.",
+            "user": request.user.username,
+            "role": request.user.role,
+        })
