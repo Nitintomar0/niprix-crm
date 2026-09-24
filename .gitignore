@@ -2,14 +2,23 @@
 __pycache__/
 *.py[cod]
 *.pyo
+.pytest_cache/
+.coverage
+.coverage.*
 .venv/
 venv/
 .env
+.env.*
+!.env.example
+!.env.*.example
 
 # Django
 db.sqlite3
 media/
 staticfiles/
+build/
+dist/
+*.egg-info/
 
 # Node
 node_modules/

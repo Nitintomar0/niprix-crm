@@ -94,9 +94,27 @@ class EmployeeProfile(models.Model):
         null=True,
         blank=True,
     )
+    reporting_manager = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="direct_reports",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.employee_code} - {self.user.username}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.department_id and self.branch_id and self.department.branch_id != self.branch_id:
+            raise ValidationError({"department": "Department must belong to the selected branch."})
+        if self.reporting_manager_id:
+            if self.reporting_manager_id == self.id:
+                raise ValidationError({"reporting_manager": "An employee cannot report to themselves."})
+            if self.branch_id and self.reporting_manager.branch.company_id != self.branch.company_id:
+                raise ValidationError({"reporting_manager": "Manager must belong to the same company."})

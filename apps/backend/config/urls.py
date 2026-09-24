@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import path
-from organizations.views import EmployeeListView
+from organizations.views import EmployeeListView, EmployeeDetailView, EmployeeCreateView
+from attendance.views import AttendanceListView, AttendanceCorrectionView, CheckInView, CheckOutView, CurrentAttendanceView
 
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -53,4 +54,11 @@ urlpatterns = [
         EmployeeListView.as_view(),
         name="employee-list",
     ),
+    path("api/employees/create/", EmployeeCreateView.as_view(), name="employee-create"),
+    path("api/employees/<int:pk>/", EmployeeDetailView.as_view(), name="employee-detail"),
+    path("api/attendance/check-in/", CheckInView.as_view(), name="attendance-check-in"),
+    path("api/attendance/check-out/", CheckOutView.as_view(), name="attendance-check-out"),
+    path("api/attendance/current/", CurrentAttendanceView.as_view(), name="attendance-current"),
+    path("api/attendance/", AttendanceListView.as_view(), name="attendance-list"),
+    path("api/attendance/<int:pk>/correct/", AttendanceCorrectionView.as_view(), name="attendance-correct"),
 ]

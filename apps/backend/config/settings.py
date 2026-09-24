@@ -12,20 +12,22 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 
+from decouple import Csv, config
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#f!-q+h7$f@8ah3gg#glvm!q*8r2exr_h-e3*)r!4auv%_+#kh'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = []
+# Configuration is environment-first. SECRET_KEY has no fallback so production
+# cannot start with a checked-in or accidental default key. For local setup,
+# copy apps/backend/.env.example to apps/backend/.env and set a unique value.
+SECRET_KEY = config("SECRET_KEY")
+DEBUG = config("DEBUG", default=False, cast=bool)
+ALLOWED_HOSTS = config(
+    "ALLOWED_HOSTS",
+    default="localhost,127.0.0.1,testserver",
+    cast=Csv(),
+)
 
 
 # Application definition
@@ -40,6 +42,7 @@ INSTALLED_APPS = [
     "accounts",
     "core",
     "organizations",
+    "attendance",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
 ]
