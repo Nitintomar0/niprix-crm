@@ -59,3 +59,13 @@ class EmployeeAPITests(APITestCase):
         )
 
         self.assertEqual(len(response.data), 1)
+
+    def test_unauthenticated_user_cannot_list_employees(self):
+        response = self.client.get(
+            reverse("employee-list")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
