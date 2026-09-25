@@ -1,26 +1,18 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
+:root { --ink: #10233f; --ink-soft: #60708a; --canvas: #f5f8fc; --surface: #ffffff; --line: #e4eaf2; --blue: #0869d8; --blue-deep: #063a8a; --orange: #ff7a00; --success: #168460; --danger: #c43d4b; }
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--canvas); }
+body { min-height: 100vh; margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--font-geist), Arial, sans-serif; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+::selection { background: #cce7ff; color: var(--ink); }
+.focus-ring:focus-visible { outline: 3px solid #8bc7ff; outline-offset: 2px; }
+.app-card { border: 1px solid var(--line); background: var(--surface); box-shadow: 0 14px 32px rgba(21, 43, 76, .055); }
+.soft-grid { background-image: linear-gradient(rgba(8, 105, 216, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(8, 105, 216, .035) 1px, transparent 1px); background-size: 36px 36px; }
+.brand-gradient { background: linear-gradient(135deg, #063a8a 0%, #087ee8 60%, #15bfe8 100%); }
+.orange-gradient { background: linear-gradient(135deg, #ffb91b 0%, #ff7a00 55%, #ef4c00 100%); }
+.shimmer { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.45s ease-in-out infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
