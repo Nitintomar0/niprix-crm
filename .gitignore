@@ -35,3 +35,7 @@ out/
 # IDE
 .vscode/
 .idea/
+
+# Private employee uploads
+apps/backend/employee-documents/
+apps/backend/employee-profile-photos/

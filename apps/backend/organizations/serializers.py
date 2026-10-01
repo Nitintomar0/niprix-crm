@@ -14,6 +14,9 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     reporting_manager_name = serializers.CharField(source="reporting_manager.user.username", read_only=True)
+    full_name = serializers.SerializerMethodField()
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+    department_name = serializers.CharField(source="department.name", read_only=True)
 
     class Meta:
         model = EmployeeProfile
@@ -21,20 +24,34 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "username",
+            "full_name",
             "email",
             "role",
             "company",
             "branch",
+            "branch_name",
             "department",
+            "department_name",
             "employee_code",
             "phone",
+            "profile_photo",
+            "designation",
+            "team",
+            "personal_address",
             "joining_date",
             "reporting_manager",
             "reporting_manager_name",
             "is_active",
+            "can_receive_leads",
+            "employment_status",
+            "last_working_date",
+            "offboarding_reason",
             "created_at",
             "updated_at",
         ]
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
 
 
 class EmployeeWriteSerializer(serializers.ModelSerializer):
@@ -47,7 +64,7 @@ class EmployeeWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EmployeeProfile
-        fields = ["id", "username", "email", "first_name", "last_name", "password", "role", "branch", "department", "employee_code", "phone", "joining_date", "reporting_manager", "is_active"]
+        fields = ["id", "username", "email", "first_name", "last_name", "password", "role", "branch", "department", "employee_code", "phone", "profile_photo", "designation", "team", "personal_address", "joining_date", "reporting_manager", "is_active", "can_receive_leads", "employment_status", "last_working_date", "offboarding_reason"]
         read_only_fields = ["id"]
 
     def validate(self, attrs):
@@ -98,16 +115,40 @@ class SelfServiceProfileSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source="user.email", required=False)
     first_name = serializers.CharField(source="user.first_name", required=False, allow_blank=True)
     last_name = serializers.CharField(source="user.last_name", required=False, allow_blank=True)
+    profile_photo = serializers.FileField(required=False, allow_null=True)
+    remove_profile_photo = serializers.BooleanField(required=False, write_only=True, default=False)
 
     class Meta:
         model = EmployeeProfile
-        fields = ["phone", "email", "first_name", "last_name"]
+        fields = ["phone", "email", "first_name", "last_name", "profile_photo", "remove_profile_photo", "personal_address"]
+
+    def validate_profile_photo(self, value):
+        if value is None:
+            return value
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("Profile photo must not exceed 5 MB.")
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if extension not in {"jpg", "jpeg", "png", "webp"}:
+            raise serializers.ValidationError("Profile photo must be a JPG, PNG, or WebP file.")
+        return value
+
+    def to_internal_value(self, data):
+        allowed = {"phone", "email", "first_name", "last_name", "profile_photo", "remove_profile_photo", "personal_address"}
+        forbidden = set(data.keys()) - allowed
+        if forbidden:
+            raise serializers.ValidationError({field: "This field cannot be changed through self-service." for field in forbidden})
+        return super().to_internal_value(data)
 
     def update(self, instance, validated_data):
         user_data = validated_data.pop("user", {})
+        remove_photo = validated_data.pop("remove_profile_photo", False)
         for attr, value in user_data.items():
             setattr(instance.user, attr, value)
         instance.user.save(update_fields=list(user_data) or None)
+        if remove_photo and instance.profile_photo:
+            instance.profile_photo.delete(save=False)
+            instance.profile_photo = None
+            instance.save(update_fields=["profile_photo", "updated_at"])
         return super().update(instance, validated_data)
         read_only_fields = [
             "id",

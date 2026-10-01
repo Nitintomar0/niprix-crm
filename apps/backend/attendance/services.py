@@ -9,6 +9,49 @@ from rest_framework.exceptions import ValidationError
 from .models import AttendancePolicy, AttendanceRecord
 
 
+def attendance_workspace_summary(*, user, attendance_date):
+    """Build a date-specific, tenant-safe attendance board including absences.
+
+    Absence and approved leave are derived from active employee profiles rather
+    than stored as synthetic attendance records, preserving the existing model.
+    """
+    from hrms.models import LeaveRequest
+    from organizations.services import visible_employee_profiles
+
+    profiles = visible_employee_profiles(user).select_related("user", "branch").filter(is_active=True, user__is_active=True)
+    profile_ids = list(profiles.values_list("pk", flat=True))
+    records = AttendanceRecord.objects.filter(company=user.company, employee_id__in=profile_ids, attendance_date=attendance_date).select_related("employee__user", "branch")
+    record_by_employee = {record.employee_id: record for record in records}
+    leave_ids = set(LeaveRequest.objects.filter(
+        company=user.company, employee_id__in=profile_ids, status=LeaveRequest.Status.APPROVED,
+        start_date__lte=attendance_date, end_date__gte=attendance_date,
+    ).values_list("employee_id", flat=True))
+    rows, counts = [], {"present": 0, "late": 0, "absent": 0, "on_leave": 0, "working_now": 0}
+    for profile in profiles.order_by("employee_code"):
+        record = record_by_employee.get(profile.pk)
+        if profile.pk in leave_ids:
+            state = "ON_LEAVE"; counts["on_leave"] += 1
+        elif not record:
+            state = "ABSENT"; counts["absent"] += 1
+        elif not record.check_out_at:
+            state = "WORKING_NOW"; counts["present"] += 1; counts["working_now"] += 1
+        elif record.status == AttendanceRecord.Status.LATE:
+            state = "LATE"; counts["present"] += 1; counts["late"] += 1
+        else:
+            state = "PRESENT"; counts["present"] += 1
+        rows.append({
+            "id": record.pk if record else None, "employee": profile.pk,
+            "employee_name": profile.user.get_full_name() or profile.user.username,
+            "employee_code": profile.employee_code, "branch": profile.branch_id,
+            "check_in_at": record.check_in_at if record else None,
+            "check_out_at": record.check_out_at if record else None,
+            "total_work_minutes": record.total_work_minutes if record else 0,
+            "early_checkout": record.early_checkout if record else False,
+            "status": state,
+        })
+    return {"date": attendance_date, "scope": "company" if user.role == "CEO" or user.is_superuser else "team" if user.role == "MANAGER" else "personal", "counts": counts, "total_active": len(profile_ids), "records": rows}
+
+
 DEFAULT_POLICY = {
     "workday_start": datetime.strptime("09:00", "%H:%M").time(),
     "workday_end": datetime.strptime("18:00", "%H:%M").time(),

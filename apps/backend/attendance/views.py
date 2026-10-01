@@ -12,7 +12,8 @@ from core.audit import log_action
 from organizations.views import OptionalPageNumberPagination
 from .models import AttendanceCorrection, AttendanceRecord
 from .serializers import AttendanceCorrectionSerializer, AttendanceRecordSerializer
-from .services import check_in, check_out, get_policy, recalculate_record, validate_profile_tenant
+from .services import attendance_workspace_summary, check_in, check_out, get_policy, recalculate_record, validate_profile_tenant
+from .live_location import clear_live_location, get_live_location, report_live_location_status, submit_live_location
 
 
 def profile_for(user):
@@ -30,7 +31,48 @@ class CheckInView(APIView):
 class CheckOutView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        return Response(AttendanceRecordSerializer(check_out(profile_for(request.user))).data)
+        profile = profile_for(request.user)
+        record = check_out(profile)
+        # Location relay must never make an otherwise valid attendance checkout fail.
+        try:
+            clear_live_location(profile=profile)
+        except Exception:
+            pass
+        return Response(AttendanceRecordSerializer(record).data)
+
+
+class LiveLocationSubmitView(APIView):
+    """Authenticated employees can update only their own temporary location."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile = profile_for(request.user)
+        if request.data.get("status"):
+            return Response(report_live_location_status(profile=profile, reason=request.data["status"]))
+        state = submit_live_location(
+            profile=profile,
+            latitude=request.data.get("latitude"),
+            longitude=request.data.get("longitude"),
+            accuracy=request.data.get("accuracy"),
+        )
+        return Response(state)
+
+
+class EmployeeLiveLocationView(APIView):
+    """A CEO-only snapshot; real-time updates arrive through the protected socket."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, employee_id):
+        if not (request.user.is_superuser or request.user.role == "CEO"):
+            raise PermissionDenied("Only CEO users can view live employee location.")
+        from organizations.models import EmployeeProfile
+
+        profile = EmployeeProfile.objects.filter(
+            pk=employee_id, branch__company_id=request.user.company_id,
+        ).first()
+        if not profile:
+            raise PermissionDenied("Employee is not available.")
+        return Response(get_live_location(company_id=request.user.company_id, employee_id=profile.pk))
 
 
 class AttendanceListView(generics.ListAPIView):
@@ -102,6 +144,21 @@ class CurrentAttendanceView(APIView):
             attendance_date=timezone.localdate(),
         ).first()
         return Response(AttendanceRecordSerializer(record).data if record else {"status": "NOT_CHECKED_IN"})
+
+
+class AttendanceSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        value = request.query_params.get("date")
+        if value:
+            try:
+                target_date = date.fromisoformat(value)
+            except ValueError:
+                raise ValidationError({"date": "Use ISO date format YYYY-MM-DD."})
+        else:
+            target_date = timezone.localdate()
+        return Response(attendance_workspace_summary(user=request.user, attendance_date=target_date))
 
 
 class AttendanceCorrectionView(APIView):

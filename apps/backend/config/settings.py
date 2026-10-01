@@ -28,11 +28,15 @@ ALLOWED_HOSTS = config(
     default="localhost,127.0.0.1,testserver",
     cast=Csv(),
 )
+NIPRIX_META_WEBHOOK_SECRET = config("NIPRIX_META_WEBHOOK_SECRET", default="")
+NIPRIX_WEBSITE_WEBHOOK_SECRET = config("NIPRIX_WEBSITE_WEBHOOK_SECRET", default="")
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -43,6 +47,10 @@ INSTALLED_APPS = [
     "core",
     "organizations",
     "attendance",
+    "workspace",
+    "leads",
+    "integrations",
+    "hrms",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
 ]
@@ -75,6 +83,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = "config.asgi.application"
 
 
 # Database
@@ -123,6 +132,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -136,7 +147,7 @@ from datetime import timedelta
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "accounts.authentication.ActiveEmployeeJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -149,4 +160,24 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
+}
+
+# Live locations are deliberately transient.  Redis is never exposed to the
+# browser; it backs the authenticated API and Channels relay only.
+REDIS_URL = config("REDIS_URL", default="redis://127.0.0.1:6379/0")
+LIVE_LOCATION_TTL_SECONDS = config("LIVE_LOCATION_TTL_SECONDS", default=600, cast=int)
+LIVE_LOCATION_STALE_SECONDS = config("LIVE_LOCATION_STALE_SECONDS", default=180, cast=int)
+LIVE_LOCATION_MIN_UPDATE_SECONDS = config("LIVE_LOCATION_MIN_UPDATE_SECONDS", default=45, cast=int)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+    }
+}
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    }
 }

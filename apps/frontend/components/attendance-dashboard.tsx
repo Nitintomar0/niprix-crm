@@ -4,14 +4,31 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { api } from "@/lib/api";
 import { ApiError, type AttendanceRecord, type CurrentAttendance, type Paginated, type Role } from "@/lib/types";
+import { useLiveAttendanceLocation } from "@/hooks/use-live-attendance-location";
 
 function isRecord(value: CurrentAttendance): value is AttendanceRecord { return "id" in value; }
 function formatDate(value: string | Date, options: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long", year: "numeric" }) { return new Intl.DateTimeFormat(undefined, options).format(new Date(value)); }
 function formatTime(value: string | null) { return value ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value)) : "—"; }
 function formatDuration(minutes: number) { const h = Math.floor(minutes / 60); const m = minutes % 60; return h ? `${h}h ${m}m` : `${m}m`; }
+function getTodayISODate() {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function getDateFromOffset(date: string, offset: number) {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + offset);
+  return getTodayISODateFromDate(value);
+}
+
+function getTodayISODateFromDate(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 function toLocalInput(value: string | null) { if (!value) return ""; const date = new Date(value); const pad = (n: number) => String(n).padStart(2, "0"); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`; }
 
-function StatusBadge({ record }: { record: AttendanceRecord }) { if (!record.check_out_at) return <span className="inline-flex rounded-full bg-[#e9f6f1] px-2.5 py-1 text-xs font-semibold text-[#168460]">Working now</span>; if (record.status === "LATE") return <span className="inline-flex rounded-full bg-[#fff4e5] px-2.5 py-1 text-xs font-semibold text-[#b76800]">Late</span>; return <span className="inline-flex rounded-full bg-[#eaf4ff] px-2.5 py-1 text-xs font-semibold text-[#0869d8]">Present</span>; }
+function StatusBadge({ record }: { record: AttendanceRecord }) { if (!record.check_out_at) return <span className="inline-flex rounded-full bg-[#e9f6f1] px-2.5 py-1 text-xs font-semibold text-[#168460]">Present · Working</span>; if (record.status === "LATE") return <span className="inline-flex rounded-full bg-[#fff4e5] px-2.5 py-1 text-xs font-semibold text-[#b76800]">Late</span>; return <span className="inline-flex rounded-full bg-[#eaf4ff] px-2.5 py-1 text-xs font-semibold text-[#0869d8]">Present</span>; }
 function Toast({ message, tone, onClose }: { message: string; tone: "success" | "error" | "info"; onClose: () => void }) { useEffect(() => { const timer = window.setTimeout(onClose, 4800); return () => window.clearTimeout(timer); }, [onClose]); return <div role="status" className={`fixed bottom-5 right-5 z-50 flex max-w-sm items-start gap-3 rounded-xl border p-4 text-sm shadow-xl ${tone === "error" ? "border-[#f4c6cc] bg-[#fff7f8] text-[#a72536]" : tone === "success" ? "border-[#b9e4d3] bg-white text-[#176047]" : "border-[#beddf9] bg-white text-[#17558d]"}`}><span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${tone === "success" ? "bg-[#dff5ec]" : "bg-[#eaf4ff]"}`}><Icon name={tone === "success" ? "check" : tone === "error" ? "alert" : "sparkle"} className="h-3.5 w-3.5" /></span><p className="pr-3 leading-5">{message}</p><button aria-label="Dismiss notification" onClick={onClose} className="focus-ring -mr-1 -mt-1 rounded p-1"><Icon name="close" className="h-4 w-4" /></button></div>; }
 
 function CorrectionDialog({ record, onClose, onSaved }: { record: AttendanceRecord; onClose: () => void; onSaved: () => void }) {
@@ -21,17 +38,97 @@ function CorrectionDialog({ record, onClose, onSaved }: { record: AttendanceReco
 }
 
 export function AttendanceDashboard({ role }: { role: Role }) {
-  const [current, setCurrent] = useState<CurrentAttendance | null>(null); const [records, setRecords] = useState<AttendanceRecord[]>([]); const [pagination, setPagination] = useState<Paginated<AttendanceRecord> | null>(null); const [page, setPage] = useState(1); const [loading, setLoading] = useState(true); const [actionBusy, setActionBusy] = useState(false); const [error, setError] = useState(""); const [toast, setToast] = useState<{ message: string; tone: "success" | "error" | "info" } | null>(null); const [correction, setCorrection] = useState<AttendanceRecord | null>(null);
-  const load = useCallback(async (targetPage = page) => { setLoading(true); setError(""); try { const [today, history] = await Promise.all([api.currentAttendance(), api.attendanceHistory(targetPage)]); setCurrent(today); if (Array.isArray(history)) { setRecords(history); setPagination(null); } else { setRecords(history.results); setPagination(history); } } catch (caught) { const message = caught instanceof Error ? caught.message : "We could not load your attendance data."; setError(caught instanceof ApiError && caught.status === 403 ? `Attendance access is restricted. ${message}` : message); } finally { setLoading(false); } }, [page]);
-  useEffect(() => { const timer = window.setTimeout(() => { void load(page); }, 0); return () => window.clearTimeout(timer); }, [load, page]);
+  const [current, setCurrent] = useState<CurrentAttendance | null>(null); const [records, setRecords] = useState<AttendanceRecord[]>([]); const [, setPagination] = useState<Paginated<AttendanceRecord> | null>(null); const [attendanceDate, setAttendanceDate] = useState(getTodayISODate()); const [loading, setLoading] = useState(true); const [actionBusy, setActionBusy] = useState(false); const [error, setError] = useState(""); const [toast, setToast] = useState<{ message: string; tone: "success" | "error" | "info" } | null>(null); const [correction, setCorrection] = useState<AttendanceRecord | null>(null);
+  const load = useCallback(async (targetDate = attendanceDate) => {
+  setLoading(true);
+  setError("");
+
+  try {
+    const [today, history] = await Promise.all([
+      api.currentAttendance(),
+      api.attendanceHistory(1, targetDate),
+    ]);
+
+    setCurrent(today);
+
+    if (Array.isArray(history)) {
+      setRecords(history);
+      setPagination(null);
+    } else {
+      setRecords(history.results);
+      setPagination(history);
+    }
+  } catch (caught) {
+    const message =
+      caught instanceof Error
+        ? caught.message
+        : "We could not load your attendance data.";
+
+    setError(
+      caught instanceof ApiError && caught.status === 403
+        ? `Attendance access is restricted. ${message}`
+        : message,
+    );
+  } finally {
+    setLoading(false);
+  }
+}, [attendanceDate]);
+  useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void load(attendanceDate);
+  }, 0);
+
+  return () => window.clearTimeout(timer);
+}, [load, attendanceDate]);
   const todayRecord = current && isRecord(current) ? current : null;
   const duration = todayRecord?.check_out_at ? todayRecord.total_work_minutes : 0;
-  async function takeAction() { if (!current || actionBusy) return; setActionBusy(true); try { const checkingOut = Boolean(todayRecord?.check_in_at) && !todayRecord?.check_out_at; await (checkingOut ? api.checkOut() : api.checkIn()); await load(page); setToast({ message: checkingOut ? "Check-out recorded. Your attendance is up to date." : "Check-in recorded. Have a productive day.", tone: "success" }); } catch (caught) { setToast({ message: caught instanceof Error ? caught.message : "The attendance action could not be completed.", tone: "error" }); } finally { setActionBusy(false); } }
   const active = Boolean(todayRecord?.check_in_at) && !todayRecord?.check_out_at; const completed = Boolean(todayRecord?.check_out_at);
-  return <><section className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="text-sm font-medium text-[#0869d8]">ATTENDANCE OVERVIEW</p><h1 className="mt-1 text-3xl font-semibold tracking-tight text-[#10233f]">Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}.</h1><p className="mt-2 text-sm text-[#60708a]">{formatDate(new Date())}</p></div><button onClick={() => void load(page)} disabled={loading} className="focus-ring inline-flex items-center justify-center gap-2 self-start rounded-xl border border-[#dce5ef] bg-white px-4 py-2.5 text-sm font-semibold text-[#35506f] shadow-sm transition hover:border-[#b9cce1] disabled:opacity-60 md:self-auto"><Icon name="refresh" className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</button></section>
-    {error ? <section role="alert" className="mt-6 flex flex-col gap-4 rounded-2xl border border-[#f0c7cd] bg-[#fffafb] p-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex gap-3"><Icon name="alert" className="mt-0.5 h-5 w-5 shrink-0 text-[#c43d4b]" /><div><h2 className="font-semibold text-[#7d2630]">{error.startsWith("Attendance access is restricted") ? "Attendance access is restricted" : "Attendance is temporarily unavailable"}</h2><p className="mt-1 text-sm text-[#9a5860]">{error}</p></div></div><button onClick={() => void load(page)} className="focus-ring rounded-lg border border-[#e7b9c0] bg-white px-3 py-2 text-sm font-semibold text-[#9b3040]">Try again</button></section> : <><section className="mt-6 grid gap-5 xl:grid-cols-[1.45fr_.8fr]"><div className="app-card overflow-hidden rounded-2xl"><div className="brand-gradient relative min-h-[256px] overflow-hidden p-6 text-white sm:p-8"><div className="absolute -right-14 -top-20 h-64 w-64 rounded-full border border-white/10" /><div className="absolute -bottom-20 right-24 h-48 w-48 rounded-full bg-[#ff8700]/30 blur-2xl" /><div className="relative flex h-full flex-col"><div className="flex items-center justify-between"><span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold">{loading ? "Syncing status" : completed ? "Day completed" : active ? "Active session" : "Ready when you are"}</span><Icon name="clock" className="h-6 w-6 text-sky-100" /></div><div className="mt-8"><p className="text-sm text-blue-100">{completed ? "Your workday is complete" : active ? "You are checked in" : "Today’s attendance"}</p><h2 className="mt-1 text-3xl font-semibold tracking-tight">{loading ? "Loading your day…" : completed ? "Nicely done." : active ? "You’re on the clock." : "Start your day."}</h2><p className="mt-3 max-w-md text-sm leading-6 text-blue-100">{completed ? `You worked ${formatDuration(duration)} today.` : active ? `Checked in at ${formatTime(todayRecord?.check_in_at ?? null)}. Your time is being recorded.` : "Check in once you are ready to begin. Your organization’s attendance policy is applied automatically."}</p></div><div className="mt-auto pt-6"><button disabled={loading || actionBusy || completed} onClick={() => void takeAction()} className={`focus-ring inline-flex min-w-40 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${active ? "orange-gradient text-white hover:brightness-105" : "bg-white text-[#075ec0] hover:bg-[#f3f9ff]"}`}><Icon name={active ? "check" : "arrow"} className="h-4 w-4" />{actionBusy ? "Recording…" : completed ? "Attendance complete" : active ? "Check out" : "Check in"}</button></div></div></div></div>
+  const locationSender = useLiveAttendanceLocation(active);
+  async function takeAction() { if (!current || actionBusy) return; setActionBusy(true); const checkingOut = Boolean(todayRecord?.check_in_at) && !todayRecord?.check_out_at; if (checkingOut) locationSender.stop(); try { await (checkingOut ? api.checkOut() : api.checkIn()); await load(attendanceDate); setToast({ message: checkingOut ? "Check-out recorded. Your attendance is up to date." : "Check-in recorded. Have a productive day.", tone: "success" }); } catch (caught) { if (checkingOut) locationSender.start(); setToast({ message: caught instanceof Error ? caught.message : "The attendance action could not be completed.", tone: "error" }); } finally { setActionBusy(false); } }
+  return <><section className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="text-sm font-medium text-[#0869d8]">ATTENDANCE OVERVIEW</p><h1 className="mt-1 text-3xl font-semibold tracking-tight text-[#10233f]">Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}.</h1><p className="mt-2 text-sm text-[#60708a]">{formatDate(new Date())}</p></div><button onClick={() => void load(attendanceDate)} disabled={loading} className="focus-ring inline-flex items-center justify-center gap-2 self-start rounded-xl border border-[#dce5ef] bg-white px-4 py-2.5 text-sm font-semibold text-[#35506f] shadow-sm transition hover:border-[#b9cce1] disabled:opacity-60 md:self-auto"><Icon name="refresh" className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</button></section>
+    {error ? <section role="alert" className="mt-6 flex flex-col gap-4 rounded-2xl border border-[#f0c7cd] bg-[#fffafb] p-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex gap-3"><Icon name="alert" className="mt-0.5 h-5 w-5 shrink-0 text-[#c43d4b]" /><div><h2 className="font-semibold text-[#7d2630]">{error.startsWith("Attendance access is restricted") ? "Attendance access is restricted" : "Attendance is temporarily unavailable"}</h2><p className="mt-1 text-sm text-[#9a5860]">{error}</p></div></div><button onClick={() => void load(attendanceDate)} className="focus-ring rounded-lg border border-[#e7b9c0] bg-white px-3 py-2 text-sm font-semibold text-[#9b3040]">Try again</button></section> : <><section className="mt-6 grid gap-5 xl:grid-cols-[1.45fr_.8fr]"><div className="app-card overflow-hidden rounded-2xl"><div className="brand-gradient relative min-h-[256px] overflow-hidden p-6 text-white sm:p-8"><div className="absolute -right-14 -top-20 h-64 w-64 rounded-full border border-white/10" /><div className="absolute -bottom-20 right-24 h-48 w-48 rounded-full bg-[#ff8700]/30 blur-2xl" /><div className="relative flex h-full flex-col"><div className="flex items-center justify-between"><span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold">{loading ? "Syncing status" : completed ? "Day completed" : active ? "Active session" : "Ready when you are"}</span><Icon name="clock" className="h-6 w-6 text-sky-100" /></div><div className="mt-8"><p className="text-sm text-blue-100">{completed ? "Your workday is complete" : active ? "You are checked in" : "Today’s attendance"}</p><h2 className="mt-1 text-3xl font-semibold tracking-tight">{loading ? "Loading your day…" : completed ? "Nicely done." : active ? "You’re on the clock." : "Start your day."}</h2><p className="mt-3 max-w-md text-sm leading-6 text-blue-100">{completed ? `You worked ${formatDuration(duration)} today.` : active ? `Checked in at ${formatTime(todayRecord?.check_in_at ?? null)}. Your time is being recorded.` : "Check in once you are ready to begin. Your organization’s attendance policy is applied automatically."}</p></div><div className="mt-auto pt-6"><button disabled={loading || actionBusy || completed} onClick={() => void takeAction()} className={`focus-ring inline-flex min-w-40 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-bold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${active ? "orange-gradient text-white hover:brightness-105" : "bg-white text-[#075ec0] hover:bg-[#f3f9ff]"}`}><Icon name={active ? "check" : "arrow"} className="h-4 w-4" />{actionBusy ? "Recording…" : completed ? "Attendance complete" : active ? "Check out" : "Check in"}</button></div></div></div></div>
       <div className="grid gap-5 sm:grid-cols-3 xl:grid-cols-1"><Metric icon="calendar" label="Check in" value={loading ? "—" : todayRecord ? formatTime(todayRecord.check_in_at) : "Not started"} note={active ? "Session in progress" : "Today"} /><Metric icon="clock" label="Working time" value={loading ? "—" : completed ? formatDuration(duration) : active ? "In progress" : "0m"} note={completed ? "Finalized" : active ? "Calculated at check-out" : "Available after check-in"} /><Metric icon="sparkle" label="Arrival status" value={loading ? "—" : todayRecord ? todayRecord.status === "LATE" ? "Late" : "On time" : "Pending"} note={todayRecord?.late_minutes ? `${todayRecord.late_minutes} min after grace period` : "Policy-aware"} /></div></section>
-      <section className="app-card mt-6 overflow-hidden rounded-2xl"><div className="flex flex-col gap-3 border-b border-[#e7edf4] px-5 py-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold tracking-tight">{role === "EMPLOYEE" ? "Recent attendance" : "Attendance records"}</h2><p className="mt-1 text-sm text-[#718198]">{role === "CEO" ? "Company records within your authorized scope" : role === "MANAGER" ? "Direct-report attendance within your authorized scope" : "Your latest attendance activity"}</p></div>{role === "CEO" && <span className="inline-flex items-center gap-2 self-start rounded-full bg-[#fff5e9] px-3 py-1.5 text-xs font-semibold text-[#a85e00]"><Icon name="shield" className="h-3.5 w-3.5" />Correction access</span>}</div><HistoryTable records={records} loading={loading} role={role} onCorrect={setCorrection} /><div className="flex items-center justify-between border-t border-[#e7edf4] px-5 py-4"><p className="text-sm text-[#718198]">{pagination ? `${pagination.count} records` : "Latest records"}</p><div className="flex gap-2"><button disabled={!pagination?.previous || loading} onClick={() => setPage((value) => Math.max(1, value - 1))} className="focus-ring rounded-lg border border-[#dce5ef] px-3 py-1.5 text-sm font-semibold text-[#506580] disabled:opacity-40">Previous</button><button disabled={!pagination?.next || loading} onClick={() => setPage((value) => value + 1)} className="focus-ring rounded-lg border border-[#dce5ef] px-3 py-1.5 text-sm font-semibold text-[#506580] disabled:opacity-40">Next</button></div></div></section></>}{correction && <CorrectionDialog record={correction} onClose={() => setCorrection(null)} onSaved={() => { setCorrection(null); void load(page); setToast({ message: "Attendance correction saved and audited.", tone: "success" }); }} />}{toast && <Toast {...toast} onClose={() => setToast(null)} />}</>;
+      <section className="app-card mt-6 overflow-hidden rounded-2xl"><div className="flex flex-col gap-3 border-b border-[#e7edf4] px-5 py-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-lg font-semibold tracking-tight">
+  {attendanceDate === getTodayISODate()
+    ? "Today's attendance"
+    : `Attendance — ${formatDate(attendanceDate, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })}`}
+</h2><p className="mt-1 text-sm text-[#718198]">{role === "CEO" ? "Company records within your authorized scope" : role === "MANAGER" ? "Direct-report attendance within your authorized scope" : "Your latest attendance activity"}</p></div>{role === "CEO" && <span className="inline-flex items-center gap-2 self-start rounded-full bg-[#fff5e9] px-3 py-1.5 text-xs font-semibold text-[#a85e00]"><Icon name="shield" className="h-3.5 w-3.5" />Correction access</span>}</div><HistoryTable records={records} loading={loading} role={role} onCorrect={setCorrection} /><div className="flex items-center justify-between border-t border-[#e7edf4] px-5 py-4">
+  <p className="text-sm text-[#718198]">
+    {attendanceDate === getTodayISODate()
+      ? "Today's attendance"
+      : formatDate(attendanceDate, {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })}
+  </p>
+
+  <div className="flex gap-2">
+    <button
+      disabled={loading}
+      onClick={() =>
+        setAttendanceDate(getDateFromOffset(attendanceDate, -1))
+      }
+      className="focus-ring rounded-lg border border-[#dce5ef] px-3 py-1.5 text-sm font-semibold text-[#506580] disabled:opacity-40"
+    >
+      ← Previous
+    </button>
+
+    <button
+      disabled={loading || attendanceDate === getTodayISODate()}
+      onClick={() =>
+        setAttendanceDate(getDateFromOffset(attendanceDate, 1))
+      }
+      className="focus-ring rounded-lg border border-[#dce5ef] px-3 py-1.5 text-sm font-semibold text-[#506580] disabled:opacity-40"
+    >
+      Next →
+    </button>
+  </div>
+</div></section></>}{correction && <CorrectionDialog record={correction} onClose={() => setCorrection(null)} onSaved={() => { setCorrection(null); void load(attendanceDate); setToast({ message: "Attendance correction saved and audited.", tone: "success" }); }} />}{toast && <Toast {...toast} onClose={() => setToast(null)} />}</>;
 }
 
 function Metric({ icon, label, value, note }: { icon: "calendar" | "clock" | "sparkle"; label: string; value: string; note: string }) { return <div className="app-card rounded-2xl p-5"><div className="flex items-center justify-between"><p className="text-sm font-medium text-[#718198]">{label}</p><span className="rounded-lg bg-[#eff6fe] p-2 text-[#0869d8]"><Icon name={icon} className="h-4 w-4" /></span></div><p className="mt-5 text-xl font-semibold tracking-tight text-[#203756]">{value}</p><p className="mt-1 text-xs text-[#8a98aa]">{note}</p></div>; }

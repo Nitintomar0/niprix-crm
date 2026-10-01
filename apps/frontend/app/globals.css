@@ -1,3 +1,4 @@
+@import "leaflet/dist/leaflet.css";
 @import "tailwindcss";
 
 :root { --ink: #10233f; --ink-soft: #60708a; --canvas: #f5f8fc; --surface: #ffffff; --line: #e4eaf2; --blue: #0869d8; --blue-deep: #063a8a; --orange: #ff7a00; --success: #168460; --danger: #c43d4b; }

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.urls import reverse
 from django.utils import timezone
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -117,6 +118,24 @@ class AttendanceAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_date_summary_includes_present_absent_leave_and_tenant_scope(self):
+        from hrms.models import LeaveRequest, LeaveType
+        today = timezone.localdate()
+        leave_type = LeaveType.objects.create(company=self.company, name="Summary leave", annual_allocation=10)
+        absent_user = User.objects.create_user(username="attendance_absent", company=self.company)
+        absent = EmployeeProfile.objects.create(user=absent_user, branch=self.branch, department=self.department, employee_code="ATT-ABSENT")
+        on_leave_user = User.objects.create_user(username="attendance_leave", company=self.company)
+        on_leave = EmployeeProfile.objects.create(user=on_leave_user, branch=self.branch, department=self.department, employee_code="ATT-LEAVE")
+        AttendanceRecord.objects.create(employee=self.profile, company=self.company, branch=self.branch, attendance_date=today, check_in_at=timezone.now(), status="PRESENT")
+        LeaveRequest.objects.create(company=self.company, employee=on_leave, leave_type=leave_type, start_date=today, end_date=today, number_of_days=1, reason="Leave", status="APPROVED")
+        self.client.force_authenticate(self.ceo)
+        response = self.client.get(reverse("attendance-summary"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["counts"]["present"], 1)
+        self.assertEqual(response.data["counts"]["on_leave"], 1)
+        self.assertEqual(response.data["counts"]["absent"], 1)
+        self.assertEqual({item["employee"] for item in response.data["records"]}, {self.profile.pk, absent.pk, on_leave.pk})
+
     def test_service_rejects_inconsistent_employee_tenant_relationships(self):
         other_company = Company.objects.create(name="Invalid Relationship Realty")
         other_branch = Branch.objects.create(company=other_company, name="Other HQ", city="Delhi")
@@ -214,3 +233,49 @@ class AttendanceAPITests(APITestCase):
         record.refresh_from_db()
         self.assertIsNone(record.check_out_at)
         self.assertFalse(AttendanceCorrection.objects.filter(record=record).exists())
+
+
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "live-location-tests"}},
+    CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+)
+class LiveLocationAPITests(APITestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Live Location Realty")
+        self.branch = Branch.objects.create(company=self.company, name="HQ", city="Bengaluru")
+        self.department = Department.objects.create(branch=self.branch, name="Sales")
+        self.ceo = User.objects.create_user(username="location_ceo", password="TestPassword123!", role=User.Role.CEO, company=self.company)
+        self.employee_user = User.objects.create_user(username="location_employee", password="TestPassword123!", role=User.Role.EMPLOYEE, company=self.company)
+        self.employee = EmployeeProfile.objects.create(user=self.employee_user, branch=self.branch, department=self.department, employee_code="LOC-001")
+        self.manager = User.objects.create_user(username="location_manager", password="TestPassword123!", role=User.Role.MANAGER, company=self.company)
+        AttendanceRecord.objects.create(employee=self.employee, company=self.company, branch=self.branch, attendance_date=timezone.localdate(), check_in_at=timezone.now())
+
+    def test_employee_can_submit_only_during_active_attendance_and_ceo_can_read_snapshot(self):
+        self.client.force_authenticate(self.employee_user)
+        response = self.client.post(reverse("live-location-submit"), {"latitude": 12.9716, "longitude": 77.5946, "accuracy": 14}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["status"], "live")
+        self.assertNotIn("employee_id", response.data)
+        self.client.force_authenticate(self.ceo)
+        snapshot = self.client.get(reverse("employee-live-location", args=[self.employee.pk]))
+        self.assertEqual(snapshot.status_code, status.HTTP_200_OK)
+        self.assertEqual(snapshot.data["latitude"], 12.9716)
+
+    def test_manager_and_other_tenant_cannot_view_live_location(self):
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.get(reverse("employee-live-location", args=[self.employee.pk])).status_code, status.HTTP_403_FORBIDDEN)
+        other_company = Company.objects.create(name="Other Live Location Realty")
+        other_branch = Branch.objects.create(company=other_company, name="HQ", city="Delhi")
+        other_department = Department.objects.create(branch=other_branch, name="Sales")
+        other_ceo = User.objects.create_user(username="other_location_ceo", role=User.Role.CEO, company=other_company)
+        self.client.force_authenticate(other_ceo)
+        self.assertEqual(self.client.get(reverse("employee-live-location", args=[self.employee.pk])).status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_checkout_removes_location_and_blocks_future_submission(self):
+        self.client.force_authenticate(self.employee_user)
+        self.client.post(reverse("live-location-submit"), {"latitude": 12.9716, "longitude": 77.5946, "accuracy": 14}, format="json")
+        self.assertEqual(self.client.post(reverse("attendance-check-out")).status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.post(reverse("live-location-submit"), {"latitude": 12.9716, "longitude": 77.5946, "accuracy": 14}, format="json").status_code, status.HTTP_400_BAD_REQUEST)
+        self.client.force_authenticate(self.ceo)
+        snapshot = self.client.get(reverse("employee-live-location", args=[self.employee.pk]))
+        self.assertEqual(snapshot.data, {"status": "unavailable", "reason": "offline"})

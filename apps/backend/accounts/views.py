@@ -5,7 +5,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView
+from .authentication import ActiveEmployeeTokenRefreshSerializer
 from .permissions import IsCEO
+
+
+class ActiveEmployeeTokenRefreshView(TokenRefreshView):
+    serializer_class = ActiveEmployeeTokenRefreshSerializer
 
 
 class MeView(APIView):

@@ -24,7 +24,7 @@ class AuthenticationTests(APITestCase):
                 "username": "test_user",
                 "password": "TestPassword123!",
             },
-            format="json",
+            format= "json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
