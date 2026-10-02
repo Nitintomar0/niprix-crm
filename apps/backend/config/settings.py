@@ -173,6 +173,29 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
+SPECTACULAR_SETTINGS = {
+    "TITLE": "NIPRIX CRM API",
+    "DESCRIPTION": "Enterprise Real Estate CRM API",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+
+    "SECURITY": [
+        {
+            "BearerAuth": [],
+        },
+    ],
+
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            },
+        },
+    },
+}
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
