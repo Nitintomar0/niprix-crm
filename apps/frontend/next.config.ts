@@ -1,9 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Django's URL patterns are slash-sensitive. Keep the URL supplied by the
-  // client intact so POST bodies are never lost to Next's slash redirect.
   skipTrailingSlashRedirect: true,
+
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "https://niprix.onrender.com/api/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
