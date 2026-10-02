@@ -136,16 +136,24 @@ class AttendanceListView(generics.ListAPIView):
 
 class CurrentAttendanceView(APIView):
     permission_classes = [IsAuthenticated]
+
     def get(self, request):
         profile = profile_for(request.user)
+
         record = AttendanceRecord.objects.filter(
             employee=profile,
-            company=request.user.company,
+            company=profile.branch.company,
             attendance_date=timezone.localdate(),
+            check_in_at__isnull=False,
+            check_out_at__isnull=True,
         ).first()
-        return Response(AttendanceRecordSerializer(record).data if record else {"status": "NOT_CHECKED_IN"})
 
-
+        return Response(
+            AttendanceRecordSerializer(record).data
+            if record
+            else {"status": "NOT_CHECKED_IN"}
+        )
+        
 class AttendanceSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
