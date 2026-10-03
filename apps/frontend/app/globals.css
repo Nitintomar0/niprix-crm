@@ -17,3 +17,642 @@ button:disabled { cursor: not-allowed; }
 .shimmer { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.45s ease-in-out infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+
+
+/* =========================================================
+   NIPRIX 3D BUILDING LOADER
+   ========================================================= */
+
+@property --niprix-color {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 10%;
+}
+
+@property --niprix-tone {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.niprix-loader {
+  --bg: #f7faff;
+  --size: 7;
+  --speed: 2;
+  --tone: 210;
+
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+  perspective: 250vmin;
+
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(8, 105, 216, 0.08),
+      transparent 45%
+    ),
+    var(--bg);
+}
+
+.niprix-loader-content {
+  position: relative;
+
+  width: calc(var(--size) * 6vmin);
+  height: calc(var(--size) * 6vmin);
+
+  transform: rotateX(45deg) rotateZ(45deg);
+
+  transform-style: preserve-3d;
+}
+
+.niprix-cuboid {
+  --height: var(--size);
+  --width: var(--size);
+  --depth: calc(var(--size) * 5);
+  --delay: calc((var(--speed) / 16) * 1s);
+  --sat: var(--niprix-color);
+  --hue: var(--niprix-tone);
+
+  --win: calc((var(--size) / 6) * 1vmin);
+
+  position: absolute;
+
+  width: calc(var(--width) * 1vmin);
+  height: calc(var(--height) * 1vmin);
+
+  transform: translate3d(0, 0, 0);
+
+  transform-style: preserve-3d;
+
+  animation:
+    niprix-grow calc(var(--speed) * 1s) ease 0s infinite,
+    niprix-colors calc(var(--speed) * 2.25s) linear 0s infinite;
+}
+
+.niprix-side {
+  position: absolute;
+
+  top: 50%;
+  left: 50%;
+
+  width: 100%;
+  height: 100%;
+
+  border-radius: 2px;
+
+  transform-style: preserve-3d;
+}
+
+/* FRONT */
+.niprix-side:nth-child(1) {
+  transform:
+    translate3d(
+      -50%,
+      -50%,
+      calc(var(--depth) * 0.5vmin)
+    );
+
+  background:
+    linear-gradient(-125deg, #ffffff99, #ffffff00),
+    hsl(var(--hue), var(--sat), 55%);
+
+  border:
+    calc((var(--size) / 12) * 1vmin)
+    solid transparent;
+
+  border-color:
+    #dce7f5
+    #aebed3
+    #b9c8d8
+    #eef4fb;
+}
+
+/* BACK */
+.niprix-side:nth-child(2) {
+  transform:
+    translate3d(
+      -50%,
+      -50%,
+      calc(var(--depth) * -0.5vmin)
+    )
+    rotateY(180deg);
+
+  background: hsl(var(--hue), var(--sat), 25%);
+
+  display: none;
+}
+
+/* RIGHT */
+.niprix-side:nth-child(3) {
+  width: calc(var(--depth) * 1vmin);
+
+  transform:
+    translate(-50%, -50%)
+    rotateY(90deg)
+    translate3d(
+      0,
+      0,
+      calc(var(--width) * 0.5vmin)
+    );
+
+  background:
+    linear-gradient(
+      135deg,
+      #ffffff99,
+      #ffffff00 50%
+    ),
+    linear-gradient(
+      90deg,
+      #ffffff00,
+      #0869d8 100%
+    ),
+    repeating-conic-gradient(
+      from 0deg
+      at var(--win) calc(var(--win) * 1.5),
+      #8ea0b2,
+      #d8e2ed 25%,
+      #ffffff00 0 100%
+    ),
+    hsl(var(--hue), var(--sat), 40%);
+
+  background-repeat:
+    no-repeat,
+    no-repeat,
+    repeat,
+    no-repeat;
+
+  background-size:
+    100% 100%,
+    100% 100%,
+    calc((var(--size) / 2) * 1.35vmin)
+    calc((var(--size) / 3.2) * 1vmin),
+    100% 100%;
+}
+
+/* LEFT */
+.niprix-side:nth-child(4) {
+  width: calc(var(--depth) * 1vmin);
+
+  transform:
+    translate(-50%, -50%)
+    rotateY(-90deg)
+    translate3d(
+      0,
+      0,
+      calc(var(--width) * 0.5vmin)
+    );
+
+  background:
+    linear-gradient(
+      -90deg,
+      hsl(var(--hue), var(--sat), 40%) 20%,
+      #dce8f5 100%
+    );
+}
+
+/* TOP */
+.niprix-side:nth-child(5) {
+  height: calc(var(--depth) * 1vmin);
+
+  transform:
+    translate(-50%, -50%)
+    rotateX(90deg)
+    translate3d(
+      0,
+      0,
+      calc(var(--height) * 0.5vmin)
+    );
+
+  background:
+    linear-gradient(
+      45deg,
+      hsl(var(--hue), var(--sat), 20%) 20%,
+      #dce8f5 100%
+    );
+}
+
+/* BOTTOM */
+.niprix-side:nth-child(6) {
+  height: calc(var(--depth) * 1vmin);
+
+  transform:
+    translate(-50%, -50%)
+    rotateX(-90deg)
+    translate3d(
+      0,
+      0,
+      calc(var(--height) * 0.5vmin)
+    );
+
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff00,
+      #cbd9e8 100%
+    ),
+    hsl(var(--hue), var(--sat), 20%);
+}
+
+/* BUILDING WINDOWS */
+.niprix-side:nth-child(1)::before {
+  content: "";
+
+  position: absolute;
+
+  width: 80%;
+  height: 80%;
+
+  left: 10%;
+  top: 10%;
+
+  box-sizing: border-box;
+
+  background:
+    linear-gradient(
+      45deg,
+      #7e93a8 0 5%,
+      transparent 0 95%,
+      #cbd7e4 0 100%
+    ),
+    conic-gradient(
+      from -90deg at 90% 90%,
+      #7d8b91,
+      #c1beb3 25%,
+      #948c99 0 62.5%,
+      #545157 0 100%
+    );
+}
+
+/* =========================================================
+   BUILDING POSITIONS
+   ========================================================= */
+
+.niprix-cuboid:nth-child(2) {
+  left: calc((var(--size) / 4) * 5vmin);
+  animation-delay: calc(var(--delay) * -15);
+}
+
+.niprix-cuboid:nth-child(3) {
+  left: calc((var(--size) / 4) * 10vmin);
+  animation-delay: calc(var(--delay) * -14);
+}
+
+.niprix-cuboid:nth-child(4) {
+  left: calc((var(--size) / 4) * 15vmin);
+  animation-delay: calc(var(--delay) * -13);
+}
+
+.niprix-cuboid:nth-child(5) {
+  left: calc((var(--size) / 4) * 20vmin);
+  animation-delay: calc(var(--delay) * -12);
+}
+
+.niprix-cuboid:nth-child(6) {
+  left: calc((var(--size) / 4) * 20vmin);
+  top: calc((var(--size) / 4) * 5vmin);
+  animation-delay: calc(var(--delay) * -11);
+}
+
+.niprix-cuboid:nth-child(7) {
+  left: calc((var(--size) / 4) * 20vmin);
+  top: calc((var(--size) / 4) * 10vmin);
+  animation-delay: calc(var(--delay) * -10);
+}
+
+.niprix-cuboid:nth-child(8) {
+  left: calc((var(--size) / 4) * 20vmin);
+  top: calc((var(--size) / 4) * 15vmin);
+  animation-delay: calc(var(--delay) * -9);
+}
+
+.niprix-cuboid:nth-child(9) {
+  left: calc((var(--size) / 4) * 20vmin);
+  top: calc((var(--size) / 4) * 20vmin);
+  animation-delay: calc(var(--delay) * -8);
+}
+
+.niprix-cuboid:nth-child(10) {
+  top: calc((var(--size) / 4) * 20vmin);
+  left: calc((var(--size) / 4) * 15vmin);
+  animation-delay: calc(var(--delay) * -7);
+}
+
+.niprix-cuboid:nth-child(11) {
+  top: calc((var(--size) / 4) * 20vmin);
+  left: calc((var(--size) / 4) * 10vmin);
+  animation-delay: calc(var(--delay) * -6);
+}
+
+.niprix-cuboid:nth-child(12) {
+  top: calc((var(--size) / 4) * 20vmin);
+  left: calc((var(--size) / 4) * 5vmin);
+  animation-delay: calc(var(--delay) * -5);
+}
+
+.niprix-cuboid:nth-child(13) {
+  top: calc((var(--size) / 4) * 20vmin);
+  left: 0;
+  animation-delay: calc(var(--delay) * -4);
+}
+
+.niprix-cuboid:nth-child(14) {
+  top: calc((var(--size) / 4) * 15vmin);
+  animation-delay: calc(var(--delay) * -3);
+}
+
+.niprix-cuboid:nth-child(15) {
+  top: calc((var(--size) / 4) * 10vmin);
+  animation-delay: calc(var(--delay) * -2);
+}
+
+.niprix-cuboid:nth-child(16) {
+  top: calc((var(--size) / 4) * 5vmin);
+  animation-delay: calc(var(--delay) * -1);
+}
+
+/* =========================================================
+   ANIMATION
+   ========================================================= */
+
+@keyframes niprix-grow {
+  0% {
+    --niprix-color: 60%;
+    transform:
+      translateZ(
+        calc(var(--size) * 1vmin)
+      );
+  }
+
+  90% {
+    --niprix-color: 10%;
+    transform:
+      translateZ(
+        calc(var(--size) * -2vmin)
+      );
+  }
+
+  100% {
+    --niprix-color: 60%;
+    transform:
+      translateZ(
+        calc(var(--size) * 1vmin)
+      );
+  }
+}
+
+@keyframes niprix-colors {
+  0% {
+    --niprix-tone: 205;
+  }
+
+  100% {
+    --niprix-tone: 215;
+  }
+}
+
+/* NIPRIX BRAND */
+/* =========================================================
+   NIPRIX BRANDING
+   ========================================================= */
+
+.niprix-loader-brand {
+  position: absolute;
+
+  /*
+   * Keep branding completely outside
+   * the 3D building animation.
+   */
+  left: 50%;
+  bottom: 8.5%;
+
+  transform: translateX(-50%);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  z-index: 20;
+
+  pointer-events: none;
+
+  white-space: nowrap;
+}
+
+/* MAIN NIPRIX NAME */
+
+.niprix-brand-name {
+  display: flex;
+  align-items: baseline;
+
+  font-family:
+    Arial,
+    Helvetica,
+    sans-serif;
+
+  font-size: clamp(42px, 5vw, 72px);
+
+  font-weight: 900;
+
+  line-height: 0.9;
+
+  letter-spacing: -0.055em;
+
+  text-transform: uppercase;
+
+  filter:
+    drop-shadow(0 8px 18px rgba(8, 105, 216, 0.12));
+
+  animation:
+    niprix-brand-in 900ms ease-out both,
+    niprix-brand-glow 2.8s ease-in-out infinite;
+}
+
+.niprix-blue {
+  color: #075fc7;
+}
+
+.niprix-dark {
+  color: #102c4f;
+}
+
+.niprix-orange {
+  color: #f28a16;
+
+  margin-left: 1px;
+}
+
+/* ANIMATED UNDERLINE / TAGLINE */
+
+.niprix-brand-line {
+  display: flex;
+  align-items: center;
+
+  width: min(330px, 55vw);
+
+  margin-top: 8px;
+
+  gap: 10px;
+}
+
+.niprix-brand-line span {
+  height: 1px;
+
+  flex: 1;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(16, 44, 79, 0.45)
+    );
+}
+
+.niprix-brand-line span:last-child {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(16, 44, 79, 0.45),
+      transparent
+    );
+}
+
+.niprix-brand-line strong {
+  font-size: 9px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.24em;
+
+  color: #7187a0;
+
+  animation:
+    niprix-tagline 2.8s ease-in-out infinite;
+}
+
+/* COMPANY DESCRIPTION */
+
+.niprix-brand-subtitle {
+  margin-top: 13px;
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.28em;
+
+  color: #6d86a3;
+
+  text-transform: uppercase;
+
+  opacity: 0;
+
+  animation:
+    niprix-subtitle-in 1s ease-out 350ms forwards;
+}
+
+/* =========================================================
+   BRAND ANIMATIONS
+   ========================================================= */
+
+@keyframes niprix-brand-in {
+  from {
+    opacity: 0;
+
+    transform:
+      translateY(18px)
+      scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+
+    transform:
+      translateY(0)
+      scale(1);
+  }
+}
+
+@keyframes niprix-brand-glow {
+  0%,
+  100% {
+    filter:
+      drop-shadow(
+        0 8px 18px
+        rgba(8, 105, 216, 0.10)
+      );
+  }
+
+  50% {
+    filter:
+      drop-shadow(
+        0 8px 24px
+        rgba(8, 105, 216, 0.22)
+      );
+  }
+}
+
+@keyframes niprix-tagline {
+  0%,
+  100% {
+    opacity: 0.55;
+    letter-spacing: 0.20em;
+  }
+
+  50% {
+    opacity: 1;
+    letter-spacing: 0.27em;
+  }
+}
+
+@keyframes niprix-subtitle-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 640px) {
+  .niprix-loader-brand {
+    bottom: 9%;
+  }
+
+  .niprix-brand-name {
+    font-size: 42px;
+  }
+
+  .niprix-brand-line {
+    width: 270px;
+  }
+
+  .niprix-brand-line strong {
+    font-size: 7px;
+  }
+
+  .niprix-brand-subtitle {
+    font-size: 8px;
+    letter-spacing: 0.20em;
+  }
+}
+
+/* ACCESSIBILITY */
+@media (prefers-reduced-motion: reduce) {
+  .niprix-cuboid {
+    animation: none;
+  }
+}
