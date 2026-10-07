@@ -1,4 +1,4 @@
-type IconName = "home" | "clock" | "users" | "chart" | "calendar" | "logout" | "menu" | "close" | "check" | "arrow" | "shield" | "alert" | "refresh" | "edit" | "building" | "sparkle" | "chevron";
+type IconName = "home" | "clock" | "users" | "chart" | "calendar" | "logout" | "menu" | "close" | "check" | "arrow" | "shield" | "alert" | "refresh" | "edit" | "building" | "sparkle" | "chevron" | "phone" | "message" | "filter" | "more" | "plus" | "search" | "back";
 
 export function Icon({ name, className = "" }: { name: IconName; className?: string }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -20,6 +20,13 @@ export function Icon({ name, className = "" }: { name: IconName; className?: str
     building: <><path {...common} d="M4 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M2 21h20M8 7h4M8 11h4M8 15h4M17 8h3M17 12h3M17 16h3" /></>,
     sparkle: <><path {...common} d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7ZM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z" /></>,
     chevron: <><path {...common} d="m9 18 6-6-6-6" /></>,
+    phone: <><path {...common} d="M5.3 3.8 8 3.1c.7-.2 1.4.2 1.6.9l1.1 3c.2.6 0 1.2-.5 1.6L8.6 9.8a15.3 15.3 0 0 0 5.6 5.6l1.2-1.6c.4-.5 1-.7 1.6-.5l3 1.1c.7.2 1.1.9.9 1.6l-.7 2.7c-.2.8-.9 1.3-1.7 1.3C10.4 20 4 13.6 4 5.5c0-.8.5-1.5 1.3-1.7Z" /></>,
+    message: <><path {...common} d="M20 11.5a7.6 7.6 0 0 1-8 7.5 8.9 8.9 0 0 1-3.8-.9L4 19l.9-3.9A7.4 7.4 0 0 1 4 11.5 7.6 7.6 0 0 1 12 4a7.6 7.6 0 0 1 8 7.5Z" /><path {...common} d="M8 12h.01M12 12h.01M16 12h.01" /></>,
+    filter: <><path {...common} d="M4 6h16M7 12h10M10 18h4" /></>,
+    more: <><circle {...common} cx="5" cy="12" r="1" /><circle {...common} cx="12" cy="12" r="1" /><circle {...common} cx="19" cy="12" r="1" /></>,
+    plus: <><path {...common} d="M12 5v14M5 12h14" /></>,
+    search: <><circle {...common} cx="10.8" cy="10.8" r="6.8" /><path {...common} d="m16 16 4 4" /></>,
+    back: <><path {...common} d="m14.5 5-7 7 7 7M8 12h11" /></>,
   };
   return <svg aria-hidden="true" className={className} viewBox="0 0 24 24">{paths[name]}</svg>;
 }

@@ -1,4 +1,5 @@
 from datetime import date
+import logging
 
 from django.db.models import Q
 from django.utils import timezone
@@ -16,6 +17,9 @@ from .serializers import (
 )
 from .services import add_note, company_for, delete_lead, lead_queryset, move_lead_to_follow_up, reassign_lead, update_lead
 from workspace.serializers import FollowUpSerializer
+
+
+logger = logging.getLogger(__name__)
 
 
 class LeadPagination(PageNumberPagination):
@@ -37,9 +41,12 @@ class ScopedLeadListMixin:
 
     def filtered_queryset(self):
         params = self.request.query_params
-        # The Leads workspace is the active inbox. A lead remains intact and
-        # addressable after entering follow-up, but is not shown in both lists.
-        queryset = lead_queryset(self.request.user).exclude(status=Lead.Status.FOLLOW_UP_NEEDED)
+        # The unfiltered Leads workspace is the active inbox. An explicit status
+        # filter is a deliberate lookup and must be able to return every valid
+        # lead status, including FOLLOW_UP_NEEDED.
+        queryset = lead_queryset(self.request.user)
+        if not params.get("status"):
+            queryset = queryset.exclude(status=Lead.Status.FOLLOW_UP_NEEDED)
         if params.get("search"):
             search = params["search"].strip()
             if len(search) > 200:
@@ -47,8 +54,13 @@ class ScopedLeadListMixin:
             normalized = "".join(character for character in search if character.isdigit())
             query = Q(name__icontains=search) | Q(email__icontains=search) | Q(preferred_location__icontains=search)
             if search.isdigit():
+                from .services import normalize_phone
+
                 query |= Q(pk=int(search))
-            if normalized:
+                # Keep an ID search exact. A one- or two-digit ID must not
+                # also become a broad phone-number fragment search.
+                query |= Q(normalized_phone=normalize_phone(search))
+            elif normalized:
                 from .services import normalize_phone
                 query |= Q(normalized_phone__icontains=normalize_phone(search))
             queryset = queryset.filter(query)
@@ -157,9 +169,15 @@ class LeadMoveToFollowUpView(APIView):
         serializer = LeadMoveToFollowUpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         lead = _lead_or_denied(request.user, pk)
-        follow_up, created = move_lead_to_follow_up(
-            actor=request.user, lead=lead, data=serializer.validated_data,
-        )
+        try:
+            follow_up, created = move_lead_to_follow_up(
+                actor=request.user, lead=lead, data=serializer.validated_data,
+            )
+        except Exception:
+            # Keep the API response safe, but retain the real exception with
+            # tenant/lead context in development and server logs for diagnosis.
+            logger.exception("Lead move-to-follow-up failed", extra={"lead_id": pk, "company_id": request.user.company_id})
+            raise
         return Response(
             {"follow_up": FollowUpSerializer(follow_up, context={"request": request}).data, "created": created},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

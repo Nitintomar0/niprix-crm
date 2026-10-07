@@ -6,6 +6,7 @@
 html { min-height: 100%; background: var(--canvas); }
 body { min-height: 100vh; margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--font-geist), Arial, sans-serif; }
 button, input { font: inherit; }
+textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 ::selection { background: #cce7ff; color: var(--ink); }
@@ -17,6 +18,18 @@ button:disabled { cursor: not-allowed; }
 .shimmer { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.45s ease-in-out infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+
+/* Mobile CRM primitives. Desktop remains intentionally unchanged above 1024px. */
+.mobile-bottom-nav { padding-bottom: env(safe-area-inset-bottom); height: calc(76px + env(safe-area-inset-bottom)); }
+.mobile-sheet-backdrop { background: rgba(10, 29, 53, .48); }
+.mobile-sheet { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
+.mobile-card-enter { animation: mobile-card-enter .24s ease-out both; }
+@keyframes mobile-card-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1023px) {
+  html, body { overflow-x: hidden; }
+  input, select, textarea, button { min-height: 44px; }
+  .app-card { box-shadow: 0 8px 22px rgba(21, 43, 76, .055); }
+}
 
 
 /* =========================================================

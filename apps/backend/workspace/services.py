@@ -30,17 +30,17 @@ FOLLOW_UP_WORKFLOW_STATUSES = {
 }
 
 FOLLOW_UP_TRANSITIONS = {
-    status: FOLLOW_UP_WORKFLOW_STATUSES - {status}
+    status: (FOLLOW_UP_WORKFLOW_STATUSES - {status}) | {FollowUp.Status.COMPLETED}
     for status in FOLLOW_UP_WORKFLOW_STATUSES
 }
 
 # Keep legacy statuses working for existing records.
 FOLLOW_UP_TRANSITIONS.update({
-    FollowUp.Status.PENDING: FOLLOW_UP_WORKFLOW_STATUSES,
-    FollowUp.Status.IN_PROGRESS: FOLLOW_UP_WORKFLOW_STATUSES,
+    FollowUp.Status.PENDING: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
+    FollowUp.Status.IN_PROGRESS: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
     FollowUp.Status.COMPLETED: set(),
     FollowUp.Status.CANCELLED: set(),
-    FollowUp.Status.MISSED: FOLLOW_UP_WORKFLOW_STATUSES,
+    FollowUp.Status.MISSED: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
 })
 
 TASK_TRANSITIONS = {
@@ -161,21 +161,17 @@ def transition_follow_up(*, actor, follow_up, status, note="", scheduled_at=None
         if scheduled_at is not None:
             follow_up.scheduled_at = scheduled_at
         follow_up.status = status
-        follow_up.completed_at = (
-    timezone.now()
-    if status in {FollowUp.Status.FOLLOW_UP_DONE, FollowUp.Status.COMPLETED}
-    else None
-)
+        follow_up.completed_at = timezone.now() if status == FollowUp.Status.COMPLETED else None
         follow_up.save()
         kind = (
-    FollowUpActivity.Type.COMPLETED
-    if status in {FollowUp.Status.FOLLOW_UP_DONE, FollowUp.Status.COMPLETED}
-    else FollowUpActivity.Type.CANCELLED
-    if status in {FollowUp.Status.CLOSED, FollowUp.Status.CANCELLED}
-    else FollowUpActivity.Type.POSTPONED
-    if status == FollowUp.Status.POSTPONED or scheduled_at is not None
-    else FollowUpActivity.Type.STATUS_CHANGED
-)
+            FollowUpActivity.Type.COMPLETED
+            if status == FollowUp.Status.COMPLETED
+            else FollowUpActivity.Type.CANCELLED
+            if status in {FollowUp.Status.CLOSED, FollowUp.Status.CANCELLED}
+            else FollowUpActivity.Type.POSTPONED
+            if status == FollowUp.Status.POSTPONED or scheduled_at is not None
+            else FollowUpActivity.Type.STATUS_CHANGED
+        )
         _activity(follow_up, actor, kind, previous_status=prior_status, previous_scheduled_at=prior_schedule, note=note)
         log_action(actor=actor, company=follow_up.company, action=f"follow_up.{status.lower()}", target=follow_up, reason=note)
     return follow_up
@@ -302,7 +298,9 @@ def prepare_reminder_events(*, now=None):
     now = now or timezone.now()
     created = []
     followups = FollowUp.objects.select_related("assigned_to__user", "company").filter(
-        status__in=[FollowUp.Status.PENDING, FollowUp.Status.IN_PROGRESS], scheduled_at__gte=now, scheduled_at__lte=now + timedelta(days=1)
+        status__in=ACTIVE_FOLLOW_UP_STATUSES,
+        scheduled_at__gte=now,
+        scheduled_at__lte=now + timedelta(days=1),
     )
     for follow_up in followups:
         preference = get_reminder_preference(follow_up.assigned_to.user)

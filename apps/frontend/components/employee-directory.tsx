@@ -340,17 +340,18 @@ export function EmployeeDirectory({ role }: { role: Role }) {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
         >
           <button
             aria-label="Close"
             onClick={() => setCreating(false)}
-            className="absolute inset-0 bg-[#10233f]/45"
+            className="mobile-sheet-backdrop absolute inset-0"
           />
           <form
             onSubmit={createEmployee}
-            className="relative w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl"
+            className="mobile-sheet relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-[24px] bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6"
           >
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#d8e1ec] sm:hidden" />
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold text-[#10233f]">

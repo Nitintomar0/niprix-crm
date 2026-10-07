@@ -25,10 +25,19 @@ import {
   type LeaveType,
   type EmployeeWork,
   type LiveLocation,
+  type InventoryItem,
+  type InventorySummary,
+  type RawLead,
+  type RawDataSummary,
+  type RawPreview,
+  type RawEligibleEmployee,
+  type RawDistributionPreview,
 } from "@/lib/types";
 
 const TOKEN_KEY = "niprix.auth.tokens";
 let refreshInFlight: Promise<boolean> | null = null;
+let employeesCache: { value: Paginated<EmployeeOption> | EmployeeOption[]; expiresAt: number } | null = null;
+let employeesInFlight: Promise<Paginated<EmployeeOption> | EmployeeOption[]> | null = null;
 
 function getTokens(): Tokens | null {
   if (typeof window === "undefined") return null;
@@ -53,24 +62,54 @@ export function saveTokens(tokens: Tokens) {
 
 export function clearTokens() {
   window.sessionStorage.removeItem(TOKEN_KEY);
+  employeesCache = null;
 }
 
 async function errorFrom(response: Response): Promise<ApiError> {
   let data: unknown;
+
   try {
     data = await response.json();
   } catch {
-    // Proxies and development error pages are not necessarily JSON.
+    return new ApiError(
+      "The request could not be completed.",
+      response.status,
+      data,
+    );
+  }
+
+  function extractMessage(value: unknown): string {
+    if (typeof value === "string") {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .map(extractMessage)
+        .filter(Boolean)
+        .join(" ");
+    }
+
+    if (value && typeof value === "object") {
+      return Object.values(value)
+        .map(extractMessage)
+        .filter(Boolean)
+        .join(" ");
+    }
+
+    return "";
   }
 
   const detail =
-    typeof data === "object" && data && "detail" in data
-      ? String(data.detail)
-      : typeof data === "object" && data
-        ? Object.values(data as Record<string, unknown>).flat().join(" ")
-        : "The request could not be completed.";
+    data && typeof data === "object" && "detail" in data
+      ? extractMessage((data as Record<string, unknown>).detail)
+      : extractMessage(data);
 
-  return new ApiError(detail || "The request could not be completed.", response.status, data);
+  return new ApiError(
+    detail || "The request could not be completed.",
+    response.status,
+    data,
+  );
 }
 
 async function fetchApi(path: string, init: RequestInit): Promise<Response> {
@@ -179,7 +218,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  employees: () => request<Paginated<EmployeeOption> | EmployeeOption[]>("/api/employees/?page=1&page_size=100"),
+  employees: async () => {
+    // Employee options change infrequently, while lead/work filters change on
+    // every selection. A short in-memory reuse removes redundant requests
+    // without persisting stale CRM data across sessions.
+    if (employeesCache && employeesCache.expiresAt > Date.now()) return employeesCache.value;
+    if (!employeesInFlight) {
+      employeesInFlight = request<Paginated<EmployeeOption> | EmployeeOption[]>("/api/employees/?page=1&page_size=100")
+        .then((value) => {
+          employeesCache = { value, expiresAt: Date.now() + 15_000 };
+          return value;
+        })
+        .finally(() => { employeesInFlight = null; });
+    }
+    return employeesInFlight;
+  },
   employeeDirectory: (query = "") => request<Paginated<EmployeeProfile> | EmployeeProfile[]>(`/api/employees/?page=1&page_size=100${query ? `&${query}` : ""}`),
   createEmployee: (body: Record<string, unknown>) => request<EmployeeProfile>("/api/employees/create/", { method: "POST", body: JSON.stringify(body) }),
   employee: (id: number) => request<EmployeeProfile>(`/api/employees/${id}/`),
@@ -236,12 +289,27 @@ export const api = {
   createLead: (body: Record<string, unknown>) => request<Lead>("/api/leads/", { method: "POST", body: JSON.stringify(body) }),
   updateLead: (id: number, body: Record<string, unknown>) => request<Lead>(`/api/leads/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   assignLead: (id: number, assigned_to: number, note = "") => request<Lead>(`/api/leads/${id}/assign/`, { method: "POST", body: JSON.stringify({ assigned_to, note }) }),
-  moveLeadToFollowUp: (id: number, body: { scheduled_at: string; title?: string; description?: string; follow_up_type?: string; priority?: string }) => request<{ follow_up: FollowUp; created: boolean }>(`/api/leads/${id}/move-to-follow-up/`, { method: "POST", body: JSON.stringify(body) }),
   leadActivities: (id: number) => request<Paginated<LeadActivity>>(`/api/leads/${id}/activities/`),
   addLeadNote: (id: number, note: string) => request<LeadActivity>(`/api/leads/${id}/activities/`, { method: "POST", body: JSON.stringify({ note }) }),
   leadSources: (id: number) => request<Paginated<LeadSource>>(`/api/leads/${id}/sources/`),
   leadAssignments: (id: number) => request<Paginated<LeadAssignment>>(`/api/leads/${id}/assignments/`),
   deleteLead: (id: number) => request<void>(`/api/leads/${id}/`, { method: "DELETE" }),
+  rawLeads: (query = "") => request<Paginated<RawLead>>(`/api/raw-data/?${query}`),
+  rawDataSummary: () => request<RawDataSummary>("/api/raw-data/summary/"),
+  createRawLead: (body: Record<string, unknown>) => request<RawLead>("/api/raw-data/", { method: "POST", body: JSON.stringify(body) }),
+  updateRawLead: (id: number, body: Record<string, unknown>) => request<RawLead>(`/api/raw-data/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteRawLead: (id: number) => request<void>(`/api/raw-data/${id}/`, { method: "DELETE" }),
+  previewRawData: (body: FormData | { rows: object[] }) => request<RawPreview>("/api/raw-data/preview/", { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body) }),
+  saveRawPreview: (rows: object[]) => request<{ created: number }>("/api/raw-data/save-preview/", { method: "POST", body: JSON.stringify({ rows }) }),
+  rawEligibleEmployees: () => request<RawEligibleEmployee[]>("/api/raw-data/eligible-employees/"),
+  previewRawDistribution: (body: Record<string, unknown>) => request<RawDistributionPreview>("/api/raw-data/distribution-preview/", { method: "POST", body: JSON.stringify(body) }),
+  distributeRawData: (body: Record<string, unknown>) => request<{ distributed: number }>("/api/raw-data/distribute/", { method: "POST", body: JSON.stringify(body) }),
+  inventory: (query = "") => request<Paginated<InventoryItem>>(`/api/inventory/?${query}`),
+  inventorySummary: () => request<InventorySummary>("/api/inventory/summary/"),
+  createInventory: (body: Record<string, unknown>) => request<InventoryItem>("/api/inventory/", { method: "POST", body: JSON.stringify(body) }),
+  bulkCreateInventory: (items: Record<string, unknown>[]) => request<InventoryItem[]>("/api/inventory/bulk/", { method: "POST", body: JSON.stringify({ items }) }),
+  updateInventory: (id: number, body: Record<string, unknown>) => request<InventoryItem>(`/api/inventory/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteInventory: (id: number) => request<void>(`/api/inventory/${id}/`, { method: "DELETE" }),
   integrations: () => request<Paginated<IntegrationConfiguration>>("/api/integrations/?page=1&page_size=100"),
   createIntegration: (body: Pick<IntegrationConfiguration, "provider" | "branch" | "external_account_id" | "is_enabled">) => request<IntegrationConfiguration>("/api/integrations/", { method: "POST", body: JSON.stringify(body) }),
   updateIntegration: (id: number, body: Partial<Pick<IntegrationConfiguration, "branch" | "external_account_id" | "is_enabled">>) => request<IntegrationConfiguration>(`/api/integrations/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),

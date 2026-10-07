@@ -24,6 +24,11 @@ from hrms.views import (
     EmployeeDocumentDetailView, EmployeeDocumentDownloadView, EmployeeDocumentListCreateView, HolidayDetailView, HolidayListCreateView,
     EmployeeDocumentOverviewListView, HRDashboardView, LeaveBalanceDetailView, LeaveBalanceListView, LeaveRequestActionView, LeaveRequestListCreateView, LeaveTypeDetailView, LeaveTypeListView,
 )
+from inventory.views import InventoryBulkCreateView, InventoryDetailView, InventoryListCreateView, InventorySummaryView
+from raw_data.views import (
+    RawDataDistributionPreviewView, RawDataDistributionView, RawDataEligibleEmployeesView,
+    RawDataPreviewView, RawDataSavePreviewView, RawDataSummaryView, RawLeadDetailView, RawLeadListCreateView,
+)
 
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -108,6 +113,18 @@ urlpatterns = [
     path("api/workspace/overdue/", WorkspaceOverdueView.as_view(), name="workspace-overdue"),
     path("api/reminder-preferences/", ReminderPreferenceView.as_view(), name="reminder-preferences"),
     path("api/leads/", LeadListCreateView.as_view(), name="lead-list"),
+    path("api/raw-data/", RawLeadListCreateView.as_view(), name="raw-lead-list"),
+    path("api/raw-data/summary/", RawDataSummaryView.as_view(), name="raw-data-summary"),
+    path("api/raw-data/preview/", RawDataPreviewView.as_view(), name="raw-data-preview"),
+    path("api/raw-data/save-preview/", RawDataSavePreviewView.as_view(), name="raw-data-save-preview"),
+    path("api/raw-data/eligible-employees/", RawDataEligibleEmployeesView.as_view(), name="raw-data-eligible-employees"),
+    path("api/raw-data/distribution-preview/", RawDataDistributionPreviewView.as_view(), name="raw-data-distribution-preview"),
+    path("api/raw-data/distribute/", RawDataDistributionView.as_view(), name="raw-data-distribute"),
+    path("api/raw-data/<int:pk>/", RawLeadDetailView.as_view(), name="raw-lead-detail"),
+    path("api/inventory/", InventoryListCreateView.as_view(), name="inventory-list"),
+    path("api/inventory/summary/", InventorySummaryView.as_view(), name="inventory-summary"),
+    path("api/inventory/bulk/", InventoryBulkCreateView.as_view(), name="inventory-bulk-create"),
+    path("api/inventory/<int:pk>/", InventoryDetailView.as_view(), name="inventory-detail"),
     path("api/leads/summary/", LeadSummaryView.as_view(), name="lead-summary"),
     path("api/leads/<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),
     path("api/leads/<int:pk>/assign/", LeadAssignView.as_view(), name="lead-assign"),

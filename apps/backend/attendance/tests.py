@@ -33,6 +33,17 @@ class AttendanceAPITests(APITestCase):
         self.assertGreaterEqual(checked_out.data["total_work_minutes"], 0)
         self.assertEqual(self.client.post(reverse("attendance-check-out")).status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_ceo_without_employee_profile_can_record_personal_attendance(self):
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(self.client.get(reverse("attendance-current")).data["status"], "NOT_CHECKED_IN")
+        checked_in = self.client.post(reverse("attendance-check-in"))
+        self.assertEqual(checked_in.status_code, status.HTTP_201_CREATED, checked_in.data)
+        self.assertIsNone(checked_in.data["employee"])
+        self.assertEqual(checked_in.data["attendance_user"], self.ceo.pk)
+        self.assertEqual(checked_in.data["employee_code"], "CEO")
+        self.assertEqual(self.client.get(reverse("attendance-current")).data["id"], checked_in.data["id"])
+        self.assertEqual(self.client.post(reverse("attendance-check-out")).status_code, status.HTTP_200_OK)
+
     def test_checkout_requires_checkin_and_inactive_profile_is_blocked(self):
         self.client.force_authenticate(self.user)
         self.assertEqual(self.client.post(reverse("attendance-check-out")).status_code, status.HTTP_400_BAD_REQUEST)

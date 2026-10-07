@@ -346,61 +346,113 @@ def reassign_lead(*, actor, lead, assignee, reason=""):
 
 
 def move_lead_to_follow_up(*, actor, lead, data):
-    """Create one active follow-up for a lead and make the state transition atomic.
+    """Create one active follow-up for a lead safely and atomically."""
 
-    Locking the lead is deliberate: a retry or two nearly simultaneous button
-    presses see the already-created active follow-up instead of creating a copy.
-    """
     from workspace.models import FollowUp
     from workspace.services import create_follow_up
 
-    company_for(actor)
-    with transaction.atomic():
-        locked = Lead.objects.select_for_update().select_related("assigned_to").get(
-            pk=lead.pk, company=company_for(actor)
-        )
-        if not locked.assigned_to_id:
-            raise ValidationError({"assigned_to": "Assign this lead before moving it to follow-up."})
+    company = company_for(actor)
 
-        existing = FollowUp.objects.select_for_update().filter(
-            company=locked.company,
-            lead=locked,
+    with transaction.atomic():
+        # Lock ONLY the Lead row.
+        # Do not use select_related() here because PostgreSQL can reject
+        # FOR UPDATE when nullable relations are joined.
+        locked = Lead.objects.select_for_update().get(
+            pk=lead.pk,
+            company_id=company.id,
+        )
+
+        if not locked.assigned_to_id:
+            raise ValidationError({
+                "assigned_to": "Assign this lead before moving it to follow-up."
+            })
+
+        # Verify the assignee belongs to the same active company.
+        assignee = EmployeeProfile.objects.select_related(
+            "user",
+            "branch",
+        ).filter(
+            pk=locked.assigned_to_id,
+            branch__company_id=company.id,
+            user__company_id=company.id,
+            is_active=True,
+            user__is_active=True,
+        ).first()
+
+        if not assignee:
+            raise ValidationError({
+                "assigned_to": "The assigned employee is no longer active in this company."
+            })
+
+        # Check whether an active follow-up already exists.
+        # This query intentionally does NOT use select_for_update().
+        existing = FollowUp.objects.filter(
+            company_id=company.id,
+            lead_id=locked.pk,
             status__in=(
                 FollowUp.Status.PENDING,
                 FollowUp.Status.IN_PROGRESS,
                 FollowUp.Status.POSTPONED,
                 FollowUp.Status.MISSED,
             ),
-        ).order_by("scheduled_at", "pk").first()
+        ).order_by(
+            "scheduled_at",
+            "pk",
+        ).first()
+
         if existing:
             return existing, False
 
         follow_up_data = {
-            "assigned_to": locked.assigned_to,
+            "assigned_to": assignee,
             "lead": locked,
             "title": data.get("title") or f"Follow up: {locked.name or locked.phone}",
             "description": data.get("description", ""),
             "scheduled_at": data["scheduled_at"],
-            "follow_up_type": data["follow_up_type"],
-            "priority": data["priority"],
+            "follow_up_type": data.get("follow_up_type", "CALL"),
+            "priority": data.get("priority", "MEDIUM"),
             "status": FollowUp.Status.PENDING,
         }
-        follow_up = create_follow_up(actor=actor, data=follow_up_data)
+
+        follow_up = create_follow_up(
+            actor=actor,
+            data=follow_up_data,
+        )
+
         old_status = locked.status
+
         if old_status != Lead.Status.FOLLOW_UP_NEEDED:
             locked.status = Lead.Status.FOLLOW_UP_NEEDED
-            locked.save(update_fields=["status", "updated_at"])
+            locked.save(
+                update_fields=[
+                    "status",
+                    "updated_at",
+                ]
+            )
+
             _activity(
-                lead=locked, actor=actor, activity_type=LeadActivity.Type.STATUS_CHANGED,
-                field_name="status", old_value=old_status,
+                lead=locked,
+                actor=actor,
+                activity_type=LeadActivity.Type.STATUS_CHANGED,
+                field_name="status",
+                old_value=old_status,
                 new_value=Lead.Status.FOLLOW_UP_NEEDED,
                 note="Moved to follow-up workflow",
-                metadata={"follow_up_id": follow_up.pk},
+                metadata={
+                    "follow_up_id": follow_up.pk,
+                },
             )
+
         log_action(
-            actor=actor, company=locked.company, action="lead.moved_to_follow_up",
-            target=locked, metadata={"follow_up_id": follow_up.pk},
+            actor=actor,
+            company=locked.company,
+            action="lead.moved_to_follow_up",
+            target=locked,
+            metadata={
+                "follow_up_id": follow_up.pk,
+            },
         )
+
         return follow_up, True
 
 

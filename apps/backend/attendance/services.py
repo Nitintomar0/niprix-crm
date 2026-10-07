@@ -4,7 +4,7 @@ from datetime import datetime
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .models import AttendancePolicy, AttendanceRecord
 
@@ -78,14 +78,8 @@ def validate_profile_tenant(profile):
     return company
 
 
-def _ensure_not_future(value, field_name):
-    if value and value > timezone.now():
-        raise ValidationError({field_name: "Future timestamps are not allowed."})
-
-
 def calculate_arrival(check_in_at, policy):
     """Return late minutes and status for a timezone-aware arrival timestamp."""
-    _ensure_not_future(check_in_at, "check_in_at")
     local_check_in = timezone.localtime(check_in_at)
     scheduled_start = timezone.make_aware(
         datetime.combine(local_check_in.date(), policy.workday_start),
@@ -99,8 +93,6 @@ def calculate_arrival(check_in_at, policy):
 def calculate_total_work_minutes(check_in_at, check_out_at):
     if not check_in_at or not check_out_at:
         return 0
-    _ensure_not_future(check_in_at, "check_in_at")
-    _ensure_not_future(check_out_at, "check_out_at")
     if check_out_at < check_in_at:
         raise ValidationError({"check_out_at": "Check-out cannot be before check-in."})
     return int((check_out_at - check_in_at).total_seconds() // 60)
@@ -125,10 +117,25 @@ def recalculate_record(record, policy=None):
     return record
 
 
-def check_in(profile):
-    if not profile.is_active or not profile.user.is_active:
-        raise ValidationError({"detail": "Inactive employees cannot check in."})
-    company = validate_profile_tenant(profile)
+def attendance_subject(user):
+    from organizations.models import EmployeeProfile
+    try:
+        profile = user.employee_profile
+    except EmployeeProfile.DoesNotExist:
+        profile = None
+    if profile:
+        if not profile.is_active or not profile.user.is_active:
+            raise ValidationError({"detail": "Inactive employees cannot check in."})
+        return profile, validate_profile_tenant(profile), profile.branch
+    if user.is_superuser or user.role == "CEO":
+        if not user.is_active or not user.company_id or not user.company.is_active:
+            raise ValidationError({"detail": "An active company account is required."})
+        return None, user.company, None
+    raise PermissionDenied("An employee profile is required.")
+
+
+def check_in(user):
+    profile, company, branch = attendance_subject(user)
     now = timezone.now()
     policy = get_policy(company)
     late_minutes, status = calculate_arrival(now, policy)
@@ -136,8 +143,9 @@ def check_in(profile):
         with transaction.atomic():
             record, created = AttendanceRecord.objects.select_for_update().get_or_create(
                 employee=profile,
+                attendance_user=None if profile else user,
                 attendance_date=timezone.localdate(now),
-                defaults={"company": company, "branch": profile.branch, "check_in_at": now, "status": status, "late_minutes": late_minutes},
+                defaults={"company": company, "branch": branch, "check_in_at": now, "status": status, "late_minutes": late_minutes},
             )
     except IntegrityError:
         raise ValidationError({"detail": "An attendance record already exists; retry the request."})
@@ -148,16 +156,14 @@ def check_in(profile):
     return record
 
 
-def check_out(profile):
-    if not profile.is_active or not profile.user.is_active:
-        raise ValidationError({"detail": "Inactive employees cannot check out."})
-    company = validate_profile_tenant(profile)
+def check_out(user):
+    profile, company, branch = attendance_subject(user)
     now = timezone.now()
     with transaction.atomic():
-        record = AttendanceRecord.objects.select_for_update().filter(employee=profile, company=company, attendance_date=timezone.localdate(now)).first()
+        record = AttendanceRecord.objects.select_for_update().filter(employee=profile, attendance_user=None if profile else user, company=company, attendance_date=timezone.localdate(now)).first()
         if not record or not record.check_in_at:
             raise ValidationError({"detail": "No active check-in exists for today."})
-        if record.branch_id != profile.branch_id:
+        if profile and record.branch_id != branch.id:
             raise ValidationError({"detail": "Attendance branch does not match the employee branch."})
         if record.check_out_at:
             raise ValidationError({"detail": "You have already checked out."})

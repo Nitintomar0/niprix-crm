@@ -174,6 +174,18 @@ class LeadAPITests(APITestCase):
         self.client.force_authenticate(self.other_user)
         self.assertEqual(self.client.post(reverse("lead-move-to-follow-up", args=[lead.pk]), payload, format="json").status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_move_to_follow_up_returns_a_useful_validation_error_for_invalid_schedule(self):
+        lead = self.create_lead(name="Schedule validation")
+        self.client.force_authenticate(self.employee_user)
+        response = self.client.post(
+            reverse("lead-move-to-follow-up", args=[lead.pk]),
+            {"scheduled_at": "not-a-date", "follow_up_type": "CALL", "priority": "MEDIUM"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("scheduled_at", response.data)
+        self.assertFalse(FollowUp.objects.filter(lead=lead).exists())
+
     def test_pagination_filters_and_hard_delete(self):
         self.create_lead(name="Rahul", status="NEW")
         self.create_lead(phone="9876543211", name="Aman", status="CONTACTED")
@@ -186,3 +198,82 @@ class LeadAPITests(APITestCase):
         self.client.force_authenticate(self.ceo)
         self.assertEqual(self.client.delete(reverse("lead-detail", args=[lead.pk])).status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Lead.objects.filter(pk=lead.pk).exists())
+
+    def test_list_filters_use_backend_values_and_preserve_scope(self):
+        hot = self.create_lead(
+            self.ceo,
+            phone="9876543220",
+            name="Noida hot lead",
+            email="noida@example.com",
+            preferred_location="Noida Sector 62",
+            source=Lead.Source.WHATSAPP,
+            status=Lead.Status.CONTACTED,
+            temperature=Lead.Temperature.HOT,
+            assigned_to=self.employee.pk,
+        )
+        cold = self.create_lead(
+            self.ceo,
+            phone="9876543221",
+            name="Delhi cold lead",
+            email="delhi@example.com",
+            preferred_location="Delhi",
+            source=Lead.Source.FACEBOOK,
+            status=Lead.Status.NEW,
+            temperature=Lead.Temperature.COLD,
+            assigned_to=self.manager.pk,
+        )
+        follow_up = self.create_lead(
+            self.ceo,
+            phone="9876543222",
+            name="Follow up lead",
+            status=Lead.Status.FOLLOW_UP_NEEDED,
+            assigned_to=self.employee.pk,
+        )
+        other = self.create_lead(
+            self.other_user,
+            phone="9876543223",
+            name="Other company Noida lead",
+            preferred_location="Noida",
+            status=Lead.Status.CONTACTED,
+            temperature=Lead.Temperature.HOT,
+        )
+        self.client.force_authenticate(self.ceo)
+
+        def ids(**params):
+            response = self.client.get(reverse("lead-list"), params)
+            self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+            return response.data["count"], {row["id"] for row in response.data["results"]}
+
+        self.assertEqual(ids(search="noida@example.com"), (1, {hot.pk}))
+        self.assertEqual(ids(search=hot.phone), (1, {hot.pk}))
+        self.assertEqual(ids(search=str(hot.pk)), (1, {hot.pk}))
+        self.assertEqual(ids(status="CONTACTED"), (1, {hot.pk}))
+        self.assertEqual(ids(status="FOLLOW_UP_NEEDED"), (1, {follow_up.pk}))
+        self.assertEqual(ids(temperature="HOT"), (1, {hot.pk}))
+        self.assertEqual(ids(source="WHATSAPP"), (1, {hot.pk}))
+        self.assertEqual(ids(assigned_to=str(self.employee.pk)), (1, {hot.pk}))
+        self.assertEqual(
+            ids(assigned_to=str(self.employee.pk), status="FOLLOW_UP_NEEDED"),
+            (1, {follow_up.pk}),
+        )
+        self.assertEqual(ids(location="sector 62"), (1, {hot.pk}))
+        self.assertEqual(
+            ids(
+                search="Noida",
+                status="CONTACTED",
+                temperature="HOT",
+                source="WHATSAPP",
+                assigned_to=str(self.employee.pk),
+                location="Noida",
+                date_from=timezone.localdate().isoformat(),
+                date_to=timezone.localdate().isoformat(),
+            ),
+            (1, {hot.pk}),
+        )
+        count, returned = ids(page="1", page_size="1", status="CONTACTED")
+        self.assertEqual(count, 1)
+        self.assertEqual(returned, {hot.pk})
+        self.assertNotIn(other.pk, returned)
+        self.assertNotIn(cold.pk, returned)
+        invalid = self.client.get(reverse("lead-list"), {"status": "Follow Up Needed"})
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)

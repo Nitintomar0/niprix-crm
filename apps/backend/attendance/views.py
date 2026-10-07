@@ -25,19 +25,20 @@ def profile_for(user):
 class CheckInView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        return Response(AttendanceRecordSerializer(check_in(profile_for(request.user))).data, status=201)
+        return Response(AttendanceRecordSerializer(check_in(request.user)).data, status=201)
 
 
 class CheckOutView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        profile = profile_for(request.user)
-        record = check_out(profile)
+        profile = profile_for(request.user) if hasattr(request.user, "employee_profile") else None
+        record = check_out(request.user)
         # Location relay must never make an otherwise valid attendance checkout fail.
-        try:
-            clear_live_location(profile=profile)
-        except Exception:
-            pass
+        if profile:
+            try:
+                clear_live_location(profile=profile)
+            except Exception:
+                pass
         return Response(AttendanceRecordSerializer(record).data)
 
 
@@ -138,11 +139,14 @@ class CurrentAttendanceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = profile_for(request.user)
-
+        user = request.user
+        profile = profile_for(user) if hasattr(user, "employee_profile") else None
+        if not profile and not (user.is_superuser or user.role == "CEO"):
+            raise PermissionDenied("An employee profile is required.")
         record = AttendanceRecord.objects.filter(
             employee=profile,
-            company=profile.branch.company,
+            attendance_user=None if profile else user,
+            company=profile.branch.company if profile else user.company,
             attendance_date=timezone.localdate(),
             check_in_at__isnull=False,
             check_out_at__isnull=True,

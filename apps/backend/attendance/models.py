@@ -20,9 +20,10 @@ class AttendanceRecord(models.Model):
         PRESENT = "PRESENT", "Present"
         LATE = "LATE", "Late"
 
-    employee = models.ForeignKey("organizations.EmployeeProfile", on_delete=models.PROTECT, related_name="attendance_records")
+    employee = models.ForeignKey("organizations.EmployeeProfile", null=True, blank=True, on_delete=models.PROTECT, related_name="attendance_records")
+    attendance_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="personal_attendance_records")
     company = models.ForeignKey("organizations.Company", on_delete=models.PROTECT, related_name="attendance_records")
-    branch = models.ForeignKey("organizations.Branch", on_delete=models.PROTECT, related_name="attendance_records")
+    branch = models.ForeignKey("organizations.Branch", null=True, blank=True, on_delete=models.PROTECT, related_name="attendance_records")
     attendance_date = models.DateField()
     check_in_at = models.DateTimeField(null=True, blank=True)
     check_out_at = models.DateTimeField(null=True, blank=True)
@@ -37,6 +38,7 @@ class AttendanceRecord(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["employee", "attendance_date"], name="unique_employee_attendance_date"),
+            models.UniqueConstraint(fields=["attendance_user", "attendance_date"], condition=Q(attendance_user__isnull=False), name="unique_user_attendance_date"),
             models.CheckConstraint(condition=Q(total_work_minutes__gte=0), name="attendance_nonnegative_duration"),
         ]
         indexes = [models.Index(fields=["company", "attendance_date"]), models.Index(fields=["employee", "attendance_date"])]

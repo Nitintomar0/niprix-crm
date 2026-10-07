@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { Icon } from "@/components/icons";
 import type {
   EmployeeOption,
   Lead,
@@ -65,6 +66,7 @@ const dateValue = (date: Date) => {
   return local.toISOString().slice(0, 10);
 };
 const contactNumber = (phone: string) => phone.replace(/\D/g, "").replace(/^00/, "");
+const hasUsablePhone = (phone?: string | null) => /^\d{7,15}$/.test(contactNumber(phone || ""));
 const whatsappUrl = (phone: string, employeeName?: string) => {
   const message = `Hello Sir, this is ${employeeName || "our team"} from Paramshiv Real Estate. You had shown interest in property. Please share your property requirement, preferred location, budget and other details so we can assist you with suitable options.`;
   return `https://wa.me/${contactNumber(phone)}?text=${encodeURIComponent(message)}`;
@@ -109,14 +111,15 @@ function Dialog({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
     >
       <button
         aria-label="Close"
         onClick={close}
-        className="absolute inset-0 bg-[#10233f]/45"
+        className="mobile-sheet-backdrop absolute inset-0"
       />
-      <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+      <div className="mobile-sheet relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[24px] bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6">
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#d8e1ec] sm:hidden" />
         <div className="flex justify-between gap-3">
           <h2 className="text-xl font-semibold text-[#203756]">{title}</h2>
           <button
@@ -187,8 +190,11 @@ export function LeadsDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const latestLoad = useRef(0);
   const load = useCallback(async () => {
     if (leadId) return;
+    const requestId = ++latestLoad.current;
     setLoading(true);
     setError("");
     try {
@@ -217,22 +223,26 @@ export function LeadsDashboard({
         api.leadSummary(),
         api.employees(),
       ]);
+      if (requestId !== latestLoad.current) return;
       setLeads(records.results);
       setTotal(records.count);
       setSummary(metrics);
       setEmployees(resultRows(people));
     } catch (caught) {
+      if (requestId !== latestLoad.current) return;
       setError(
         caught instanceof Error ? caught.message : "Could not load leads.",
       );
     } finally {
-      setLoading(false);
+      if (requestId === latestLoad.current) setLoading(false);
     }
   }, [assignedTo, dateFilter, dateFrom, dateTo, leadId, location, page, search, source, specificDate, status, temperature]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void load();
-    }, 0);
+    // Avoid a full list/summary request for every keystroke while keeping
+    // filter changes responsive.
+    }, 250);
     return () => window.clearTimeout(timer);
   }, [load]);
   if (leadId) return <LeadDetail id={leadId} role={role} />;
@@ -254,8 +264,25 @@ export function LeadsDashboard({
       );
     }
   }
+  const resetFilters = () => {
+    setPage(1); setStatus(""); setTemperature(""); setSource(""); setAssignedTo(""); setLocation(""); setDateFilter(""); setSpecificDate(""); setDateFrom(""); setDateTo("");
+  };
+  const activeFilterCount = [status, temperature, source, assignedTo, location, dateFilter, specificDate, dateFrom, dateTo].filter(Boolean).length;
+  const filterControls = (className: string) => (
+    <div className={className}>
+      <select value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All statuses</option>{statuses.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select>
+      <select value={temperature} onChange={(event) => { setPage(1); setTemperature(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All temperatures</option>{temperatures.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select>
+      <select value={source} onChange={(event) => { setPage(1); setSource(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All sources</option>{sources.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select>
+      <select value={assignedTo} onChange={(event) => { setPage(1); setAssignedTo(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All permitted owners</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.display_name || employee.username}</option>)}</select>
+      <input value={location} onChange={(event) => { setPage(1); setLocation(event.target.value); }} placeholder="Filter location" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
+      <select value={dateFilter} onChange={(event) => { setPage(1); setDateFilter(event.target.value); setSpecificDate(""); setDateFrom(""); setDateTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All received dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This week</option><option value="month">This month</option></select>
+      <input value={specificDate} onChange={(event) => { setPage(1); setSpecificDate(event.target.value); setDateFilter(""); setDateFrom(""); setDateTo(""); }} type="date" aria-label="Specific lead received date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
+      <input value={dateFrom} max={dateTo || undefined} onChange={(event) => { setPage(1); setDateFrom(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received from date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
+      <input value={dateTo} min={dateFrom || undefined} onChange={(event) => { setPage(1); setDateTo(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received to date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
+    </div>
+  );
   return (
-    <section className="space-y-6">
+    <section className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-[#60708a]">
@@ -266,13 +293,13 @@ export function LeadsDashboard({
                 ? "team"
                 : "assigned work"}
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-[#203756]">Leads</h1>
+          <h1 className="mt-1 text-[24px] font-semibold tracking-tight text-[#203756]">Leads</h1>
         </div>
         <button
           onClick={() => setCreating(true)}
-          className="focus-ring rounded-lg bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white"
+          className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_16px_rgba(8,105,216,.18)]"
         >
-          Create lead
+          <Icon name="plus" className="h-4 w-4" /> Create lead
         </button>
       </div>
       {summary && (
@@ -286,8 +313,12 @@ export function LeadsDashboard({
           <Card title="Closed" value={summary.closed} />
         </div>
       )}
-      <div className="app-card rounded-2xl p-5">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="app-card rounded-2xl p-3 sm:p-5">
+        <div className="flex gap-2 md:hidden">
+          <label className="relative min-w-0 flex-1"><span className="sr-only">Search leads</span><Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#75869b]" /><input value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} placeholder="Search leads" className="focus-ring w-full rounded-xl border border-[#dce4ee] py-2.5 pl-9 pr-3 text-sm" /></label>
+          <button onClick={() => setFiltersOpen(true)} className="focus-ring relative inline-flex min-h-11 items-center gap-1 rounded-xl border border-[#dce4ee] px-3 text-sm font-semibold text-[#405773]"><Icon name="filter" className="h-4 w-4" />Filter{activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff7a00] px-1 text-[10px] text-white">{activeFilterCount}</span>}</button>
+        </div>
+        <div className="hidden grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <input
             value={search}
             onChange={(event) => {
@@ -307,7 +338,7 @@ export function LeadsDashboard({
           >
             <option value="">All statuses</option>
             {statuses.map((item) => (
-              <option key={item}>{label(item)}</option>
+              <option key={item} value={item}>{label(item)}</option>
             ))}
           </select>
           <select
@@ -320,7 +351,7 @@ export function LeadsDashboard({
           >
             <option value="">All temperatures</option>
             {temperatures.map((item) => (
-              <option key={item}>{label(item)}</option>
+              <option key={item} value={item}>{label(item)}</option>
             ))}
           </select>
           <select
@@ -333,7 +364,7 @@ export function LeadsDashboard({
           >
             <option value="">All sources</option>
             {sources.map((item) => (
-              <option key={item}>{label(item)}</option>
+              <option key={item} value={item}>{label(item)}</option>
             ))}
           </select>
           <select
@@ -373,7 +404,14 @@ export function LeadsDashboard({
             {error}
           </p>
         )}
-        <div className="mt-5 overflow-x-auto">
+        {loading && <div className="mt-5 grid gap-3 md:hidden">{[0, 1, 2].map((item) => <div key={item} className="shimmer h-36 rounded-2xl" />)}</div>}
+        <div className="mt-5 grid gap-3 md:hidden">
+          {!loading && leads.map((lead, index) => <article key={lead.id} className="mobile-card-enter rounded-2xl border border-[#e2eaf3] bg-white p-4" style={{ animationDelay: `${index * 25}ms` }}>
+            <Link href={`/leads/${lead.id}`} className="block focus-ring rounded-lg"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-[16px] font-bold text-[#203756]">{empty(lead.name)}</h2><p className="mt-1 truncate text-[13px] text-[#60708a]">{lead.phone || "No phone available"}</p></div><Badge value={lead.temperature} /></div><p className="mt-3 truncate text-sm font-medium text-[#405773]">{empty(lead.property_type)} <span className="text-[#9aa7b8]">·</span> {empty(lead.preferred_location)}</p><div className="mt-3 flex flex-wrap gap-1.5"><Badge value={lead.status} /><Badge value={lead.source} /></div>{role !== "EMPLOYEE" && <p className="mt-3 truncate text-xs text-[#75869b]">Owner: {lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username || "Unassigned"}</p>}</Link>
+            <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[#edf1f5] pt-3">{hasUsablePhone(lead.phone) ? <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#edf8f4] text-xs font-bold text-[#168460]"><Icon name="phone" className="h-3.5 w-3.5" />Call</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">No number</span>}{hasUsablePhone(lead.phone) ? <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#e9f8ef] text-xs font-bold text-[#168460]"><Icon name="message" className="h-3.5 w-3.5" />WhatsApp</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">WhatsApp</span>}<Link href={`/leads/${lead.id}`} className="focus-ring inline-flex min-h-10 items-center justify-center rounded-xl bg-[#eaf4ff] text-xs font-bold text-[#0869d8]">Open</Link></div>
+          </article>)}
+        </div>
+        <div className="mt-5 hidden overflow-x-auto md:block">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="border-b text-xs uppercase tracking-[.08em] text-[#8291a4]">
               <tr>
@@ -418,8 +456,8 @@ export function LeadsDashboard({
                     </div>
                   </td>
                   <td className="py-4 text-right">
-                    {contactNumber(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">Call</a>}
-                    {contactNumber(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">WhatsApp</a>}
+                    {hasUsablePhone(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">Call</a>}
+                    {hasUsablePhone(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">WhatsApp</a>}
                     <Link
                       href={`/leads/${lead.id}`}
                       className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#0869d8]"
@@ -433,9 +471,7 @@ export function LeadsDashboard({
           </table>
         </div>
         {!loading && !leads.length && (
-          <p className="py-12 text-center text-sm text-[#60708a]">
-            No leads match these filters.
-          </p>
+          <div className="py-12 text-center"><span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#eaf4ff] text-[#0869d8]"><Icon name="users" className="h-5 w-5" /></span><p className="mt-3 text-sm font-semibold text-[#405773]">No leads found</p><p className="mt-1 text-sm text-[#75869b]">Try changing your search or filters.</p>{activeFilterCount > 0 && <button onClick={resetFilters} className="mt-3 text-sm font-bold text-[#0869d8]">Clear filters</button>}</div>
         )}
         <div className="mt-4 flex items-center justify-between text-sm text-[#60708a]">
           <span>
@@ -494,6 +530,7 @@ export function LeadsDashboard({
           </form>
         </Dialog>
       )}
+      {filtersOpen && <Dialog title="Filter leads" close={() => setFiltersOpen(false)}><div className="mt-4 space-y-3">{filterControls("grid gap-3")}</div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={resetFilters} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></Dialog>}
     </section>
   );
 }
@@ -508,8 +545,8 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [movingToFollowUp, setMovingToFollowUp] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const [callLog, setCallLog] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -563,6 +600,7 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
         </p>
       </section>
     );
+  const currentLead = lead;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -622,22 +660,42 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
       setBusy(false);
     }
   }
-  async function moveToFollowUp(event: FormEvent<HTMLFormElement>) {
+  async function logCall(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const nextStatus = String(data.get("status") || "CONTACTED");
+    const callNote = String(data.get("note") || "").trim();
+    const followUpAt = String(data.get("follow_up_at") || "");
+    const shouldCreateFollowUp = data.get("create_follow_up") === "on";
+    if (shouldCreateFollowUp && !followUpAt) {
+      setError("Choose a follow-up date and time before saving.");
+      return;
+    }
+    if (shouldCreateFollowUp && !currentLead.assigned_to) {
+      setError("Assign this lead before creating a follow-up.");
+      return;
+    }
     setBusy(true);
+    setError("");
     try {
-      await api.moveLeadToFollowUp(id, {
-        scheduled_at: String(data.get("scheduled_at")),
-        title: String(data.get("title") || ""),
-        description: String(data.get("description") || ""),
-        follow_up_type: String(data.get("follow_up_type") || "CALL"),
-        priority: String(data.get("priority") || "MEDIUM"),
-      });
-      setMovingToFollowUp(false);
+      await api.updateLead(id, { status: nextStatus });
+      if (callNote) await api.addLeadNote(id, `Call result: ${callNote}`);
+      if (shouldCreateFollowUp && currentLead.assigned_to && followUpAt) {
+        await api.createFollowUp({
+          title: `Follow up with ${empty(currentLead.name)}`,
+          description: callNote,
+          assigned_to: currentLead.assigned_to,
+          lead: id,
+          scheduled_at: new Date(followUpAt).toISOString(),
+          follow_up_type: "CALL",
+          priority: "MEDIUM",
+          status: "PENDING",
+        });
+      }
+      setCallLog(false);
       await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not move this lead to follow-up.");
+      setError(caught instanceof Error ? caught.message : "Could not save this call result.");
     } finally {
       setBusy(false);
     }
@@ -658,13 +716,13 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
       </section>
     );
   return (
-    <section className="space-y-6">
+    <section className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link href="/leads" className="text-sm font-semibold text-[#0869d8]">
             ← Back to leads
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-[#203756]">
+          <h1 className="mt-2 text-[24px] font-semibold tracking-tight text-[#203756]">
             {empty(lead.name)}{" "}
             <span className="text-base font-medium text-[#7b8ba1]">
               #{lead.id}
@@ -672,27 +730,22 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
           </h1>
           <p className="mt-1 text-sm text-[#60708a]">Lead received: {new Date(lead.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <Badge value={lead.status} />
           <Badge value={lead.temperature} />
-          <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring rounded-lg border border-[#168460] px-4 py-2 text-sm font-semibold text-[#168460]">Call</a>
-          <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring rounded-lg border border-[#168460] px-4 py-2 text-sm font-semibold text-[#168460]">WhatsApp</a>
+          {hasUsablePhone(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} onClick={() => setCallLog(true)} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white"><Icon name="phone" className="h-4 w-4" />Call</a>}
+          {hasUsablePhone(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#e9f8ef] px-4 py-2.5 text-sm font-bold text-[#168460]"><Icon name="message" className="h-4 w-4" />WhatsApp</a>}
+          {!hasUsablePhone(lead.phone) && <span className="inline-flex min-h-11 items-center rounded-xl bg-[#f1f4f7] px-4 text-sm font-semibold text-[#718198]">No usable phone number</span>}
           <button
             onClick={() => setEditing(true)}
-            className="focus-ring rounded-lg border border-[#0869d8] px-4 py-2 text-sm font-semibold text-[#0869d8]"
+            className="focus-ring min-h-11 rounded-xl border border-[#0869d8] px-4 py-2 text-sm font-semibold text-[#0869d8]"
           >
             Edit lead
-          </button>
-          <button
-            onClick={() => setMovingToFollowUp(true)}
-            className="focus-ring rounded-lg bg-[#0869d8] px-4 py-2 text-sm font-semibold text-white"
-          >
-            Move to follow-up
           </button>
           {role !== "EMPLOYEE" && (
             <button
               onClick={() => setConfirmDelete(true)}
-              className="focus-ring rounded-lg border border-[#c43d4b] px-4 py-2 text-sm font-semibold text-[#c43d4b]"
+              className="focus-ring min-h-11 rounded-xl border border-[#c43d4b] px-4 py-2 text-sm font-semibold text-[#c43d4b]"
             >
               Delete lead
             </button>
@@ -997,6 +1050,7 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
           </form>
         </Dialog>
       )}
+      {callLog && <Dialog title="Log call result" close={() => setCallLog(false)}><form onSubmit={logCall} className="mt-4 space-y-4"><p className="text-sm text-[#60708a]">Save the outcome while the conversation is fresh.</p><label className="block text-sm font-medium text-[#405773]">Call outcome<select name="status" defaultValue="CONTACTED" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm">{statuses.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label><label className="block text-sm font-medium text-[#405773]">Notes<textarea name="note" placeholder="What did the lead say?" className="focus-ring mt-1 min-h-24 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><label className="flex min-h-11 items-center gap-3 rounded-xl bg-[#f5f8fc] px-3 text-sm font-semibold text-[#405773]"><input name="create_follow_up" type="checkbox" className="h-4 min-h-0 w-4" />Create a follow-up</label><label className="block text-sm font-medium text-[#405773]">Follow-up date & time<input name="follow_up_at" type="datetime-local" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><button disabled={busy} className="focus-ring flex w-full items-center justify-center rounded-xl bg-[#0869d8] px-4 py-3 text-sm font-bold text-white disabled:opacity-60">{busy ? "Saving…" : "Save call result"}</button></form></Dialog>}
       {confirmDelete && (
         <Dialog title="Permanently delete lead" close={() => setConfirmDelete(false)}>
           <div className="mt-5 space-y-5">
@@ -1009,18 +1063,6 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
               <button disabled={busy} onClick={() => void remove()} className="focus-ring rounded-lg bg-[#c43d4b] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? "Deleting…" : "Permanently delete"}</button>
             </div>
           </div>
-        </Dialog>
-      )}
-      {movingToFollowUp && (
-        <Dialog title="Move lead to follow-up" close={() => setMovingToFollowUp(false)}>
-          <form onSubmit={moveToFollowUp} className="mt-5 space-y-4">
-            <p className="text-sm text-[#60708a]">This keeps the lead ID, customer details, assignment, and timeline intact, then schedules the next customer touchpoint.</p>
-            <Input name="title" label="Follow-up title" defaultValue={`Follow up: ${lead.name || lead.phone}`} />
-            <Input name="scheduled_at" label="Schedule" type="datetime-local" required />
-            <label className="block text-sm font-medium text-[#405773]">Type<select name="follow_up_type" defaultValue="CALL" className="focus-ring mt-1 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"><option value="CALL">Call</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Email</option><option value="SITE_VISIT">Site visit</option><option value="MEETING">Meeting</option><option value="OTHER">Other</option></select></label>
-            <label className="block text-sm font-medium text-[#405773]">Notes<textarea name="description" className="focus-ring mt-1 min-h-20 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" /></label>
-            <div className="flex justify-end gap-3"><button type="button" onClick={() => setMovingToFollowUp(false)} className="focus-ring rounded-lg px-4 py-2.5 text-sm font-semibold text-[#60708a]">Cancel</button><button disabled={busy} className="focus-ring rounded-lg bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? "Moving…" : "Confirm move"}</button></div>
-          </form>
         </Dialog>
       )}
     </section>
