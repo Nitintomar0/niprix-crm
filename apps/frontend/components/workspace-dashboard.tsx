@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Icon } from "@/components/icons";
 import {
@@ -29,19 +30,12 @@ const followUpTypes = [
   "OTHER",
 ] as const;
 const followUpStatuses = [
-  "NEW",
-  "CONTACTED",
-  "SITE_VISIT_REQUESTED",
-  "SITE_VISIT_DONE",
-  "FOLLOW_UP_NEEDED",
-  "FOLLOW_UP_DONE",
+  "PENDING",
+  "IN_PROGRESS",
   "POSTPONED",
-  "DIFFERENT_REQUIREMENT",
-  "NOT_INTERESTED",
-  "CLOSED",
-  "INVALID_PHONE",
-  "NOT_LOOKING_PROPERTY",
-  "USER_IS_AGENT",
+  "MISSED",
+  "CANCELLED",
+  "COMPLETED",
 ] as const;
 const taskStatuses = ["TODO", "IN_PROGRESS", "BLOCKED", "CANCELLED"] as const;
 
@@ -211,6 +205,7 @@ export function WorkDashboard({
   role: Role;
 }) {
   const isFollowUp = kind === "followups";
+  const searchParams = useSearchParams();
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [rows, setRows] = useState<(FollowUp | Task)[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
@@ -220,6 +215,10 @@ export function WorkDashboard({
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
+  const [temperature, setTemperature] = useState("");
+  const [source, setSource] = useState("");
+  const [location, setLocation] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState<FollowUp | Task | null | "new">(null);
@@ -227,6 +226,7 @@ export function WorkDashboard({
   const [activities, setActivities] = useState<FollowUpActivity[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [focusedFollowUp, setFocusedFollowUp] = useState<FollowUp | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -235,6 +235,10 @@ export function WorkDashboard({
     if (status) query.set("status", status);
     if (priority) query.set("priority", priority);
     if (assignedTo) query.set("assigned_to", assignedTo);
+    if (isFollowUp && temperature) query.set("temperature", temperature);
+    if (isFollowUp && source) query.set("source", source);
+    if (isFollowUp && location) query.set("location", location);
+    if (isFollowUp && scheduledDate) query.set("date", scheduledDate);
     try {
       const [nextSummary, listed, people] = await Promise.all([
         api.workspaceSummary(),
@@ -256,13 +260,19 @@ export function WorkDashboard({
     } finally {
       setLoading(false);
     }
-  }, [assignedTo, isFollowUp, page, priority, search, status]);
+  }, [assignedTo, isFollowUp, location, page, priority, scheduledDate, search, source, status, temperature]);
   useEffect(() => {
     // Search and filter state can change in quick succession; coalesce them
     // into one request instead of competing stale responses.
     const id = window.setTimeout(() => void load(), 250);
     return () => window.clearTimeout(id);
   }, [load]);
+  useEffect(() => {
+    const rawId = searchParams.get("follow_up");
+    const followUpId = rawId ? Number(rawId) : 0;
+    if (!isFollowUp || !Number.isSafeInteger(followUpId) || followUpId <= 0) return;
+    void api.followUp(followUpId).then(setFocusedFollowUp).catch((caught: unknown) => setError(message(caught, "That follow-up is not available.")));
+  }, [isFollowUp, searchParams]);
   const metrics = summary
     ? isFollowUp
       ? [
@@ -445,7 +455,7 @@ export function WorkDashboard({
           >
             <option value="">All statuses</option>
             {(isFollowUp
-              ? [...followUpStatuses, "COMPLETED"]
+              ? followUpStatuses
               : [...taskStatuses, "COMPLETED"]
             ).map((value) => (
               <option key={value} value={value}>
@@ -484,6 +494,7 @@ export function WorkDashboard({
             ))}
           </Select>
         </div>
+        {isFollowUp && <div className="mt-3 hidden gap-3 md:grid md:grid-cols-4"><Select name="filter-temperature" value={temperature} onChange={(value) => { setPage(1); setTemperature(value); }}><option value="">All lead temperatures</option><option value="HOT">Hot</option><option value="WARM">Warm</option><option value="COLD">Cold</option></Select><Select name="filter-source" value={source} onChange={(value) => { setPage(1); setSource(value); }}><option value="">All lead sources</option><option value="WHATSAPP">WhatsApp</option><option value="FACEBOOK">Facebook</option><option value="INSTAGRAM">Instagram</option><option value="META_LEAD_AD">Meta lead ad</option><option value="WEBSITE">Website</option><option value="MANUAL">Manual</option><option value="REFERRAL">Referral</option><option value="OTHER">Other</option></Select><input value={location} onChange={(event) => { setPage(1); setLocation(event.target.value); }} placeholder="Lead location" className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" /><input value={scheduledDate} type="date" aria-label="Scheduled date" onChange={(event) => { setPage(1); setScheduledDate(event.target.value); }} className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" /></div>}
         {isFollowUp ? (
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {(rows as FollowUp[]).map((followUp) => {
@@ -749,7 +760,8 @@ export function WorkDashboard({
           </form>
         </Dialog>
       )}
-      {filtersOpen && <Dialog title={`Filter ${isFollowUp ? "follow-ups" : "tasks"}`} close={() => setFiltersOpen(false)}><div className="mt-4 grid gap-3"><label className="text-sm font-medium text-[#405773]">Status<Select name="filter-status-mobile" value={status} onChange={(value) => { setPage(1); setStatus(value); }}><option value="">All statuses</option>{(isFollowUp ? [...followUpStatuses, "COMPLETED"] : [...taskStatuses, "COMPLETED"]).map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Priority<Select name="filter-priority-mobile" value={priority} onChange={(value) => { setPage(1); setPriority(value); }}><option value="">All priorities</option>{priorities.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Owner<Select name="filter-owner-mobile" value={assignedTo} onChange={(value) => { setPage(1); setAssignedTo(value); }}><option value="">All permitted owners</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.display_name || employee.username}</option>)}</Select></label></div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={() => { setPage(1); setStatus(""); setPriority(""); setAssignedTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></Dialog>}
+      {filtersOpen && <Dialog title={`Filter ${isFollowUp ? "follow-ups" : "tasks"}`} close={() => setFiltersOpen(false)}><div className="mt-4 grid gap-3"><label className="text-sm font-medium text-[#405773]">Status<Select name="filter-status-mobile" value={status} onChange={(value) => { setPage(1); setStatus(value); }}><option value="">All statuses</option>{(isFollowUp ? followUpStatuses : [...taskStatuses, "COMPLETED"]).map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Priority<Select name="filter-priority-mobile" value={priority} onChange={(value) => { setPage(1); setPriority(value); }}><option value="">All priorities</option>{priorities.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Owner<Select name="filter-owner-mobile" value={assignedTo} onChange={(value) => { setPage(1); setAssignedTo(value); }}><option value="">All permitted owners</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.display_name || employee.username}</option>)}</Select></label></div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={() => { setPage(1); setStatus(""); setPriority(""); setAssignedTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></Dialog>}
+      {focusedFollowUp && <Dialog title="Follow-up details" close={() => setFocusedFollowUp(null)}><div className="mt-5 space-y-4"><div><p className="text-xs font-semibold tracking-[.1em] text-[#0869d8]">FOLLOW-UP #{focusedFollowUp.id}</p><h3 className="mt-1 text-xl font-semibold text-[#203756]">{focusedFollowUp.title}</h3><p className="mt-1 text-sm text-[#60708a]">{focusedFollowUp.lead_name || "No linked lead"}{focusedFollowUp.lead_phone ? ` · ${focusedFollowUp.lead_phone}` : ""}</p></div><div className="grid gap-3 rounded-xl bg-[#f6f9fd] p-4 text-sm sm:grid-cols-2"><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Scheduled</strong>{new Date(focusedFollowUp.scheduled_at).toLocaleString()}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Owner</strong>{focusedFollowUp.assigned_to_detail.display_name || focusedFollowUp.assigned_to_detail.username}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Status</strong>{label(focusedFollowUp.status)}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Priority</strong>{label(focusedFollowUp.priority)}</p></div>{focusedFollowUp.description && <p className="text-sm leading-6 text-[#526984]">{focusedFollowUp.description}</p>}<div className="flex justify-end"><button onClick={() => { setForm(focusedFollowUp); setFocusedFollowUp(null); }} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white">Edit follow-up</button></div></div></Dialog>}
       {action && (
         <Dialog
           title={activities ? "Follow-up history" : "Postpone follow-up"}

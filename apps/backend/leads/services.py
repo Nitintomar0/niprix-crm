@@ -13,6 +13,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from core.audit import log_action
+from core.notifications import create_notification
 from organizations.models import EmployeeProfile
 
 from .models import Lead, LeadActivity, LeadAssignment, LeadAssignmentCursor, LeadSource
@@ -267,6 +268,16 @@ def _create_or_enrich_for_company(*, company, actor, data):
         if assignee:
             LeadAssignment.objects.create(company=company, lead=lead, assigned_to=assignee, assigned_by=actor if actor is not None else None, assignment_type=LeadAssignment.Type.ASSIGNED if requested_assignee else LeadAssignment.Type.AUTO_ASSIGNED)
             _activity(lead=lead, actor=actor, activity_type=LeadActivity.Type.ASSIGNED, field_name="assigned_to", new_value=assignee.user.username)
+            if assignee.user_id != getattr(actor, "pk", None):
+                create_notification(
+                    company=company,
+                    recipient=assignee.user,
+                    notification_type="LEAD_ASSIGNED",
+                    title="New lead assigned",
+                    body=f"{lead.name} has been added to your pipeline.",
+                    href=f"/leads/{lead.pk}",
+                    metadata={"lead_id": lead.pk},
+                )
         log_action(actor=actor, company=company, action="lead.created", target=lead, metadata={"source": source})
         return LeadMutation(lead, True)
 
@@ -340,8 +351,24 @@ def reassign_lead(*, actor, lead, assignee, reason=""):
     assignee = validate_assignee(actor, assignee)
     with transaction.atomic():
         locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company_for(actor))
-        _record_assignment(lead=locked, actor=actor, assignee=assignee, assignment_type=LeadAssignment.Type.REASSIGNED, reason=reason)
+        changed = _record_assignment(lead=locked, actor=actor, assignee=assignee, assignment_type=LeadAssignment.Type.REASSIGNED, reason=reason)
+        if changed:
+            # Follow-ups are work items attached to this Lead, not copies of it.
+            # Keep active work owned by the same person while preserving the
+            # assignee recorded on completed/cancelled history.
+            from workspace.services import sync_active_follow_up_owners
+            sync_active_follow_up_owners(actor=actor, lead=locked, assignee=assignee, note=reason)
         log_action(actor=actor, company=locked.company, action="lead.reassigned", target=locked, metadata={"assigned_to": assignee.pk}, reason=reason)
+        if changed and assignee.user_id != actor.pk:
+            create_notification(
+                company=locked.company,
+                recipient=assignee.user,
+                notification_type="LEAD_ASSIGNED",
+                title="Lead assigned to you",
+                body=f"{locked.name} has been assigned to your pipeline.",
+                href=f"/leads/{locked.pk}",
+                metadata={"lead_id": locked.pk},
+            )
         return locked
 
 
@@ -349,7 +376,7 @@ def move_lead_to_follow_up(*, actor, lead, data):
     """Create one active follow-up for a lead safely and atomically."""
 
     from workspace.models import FollowUp
-    from workspace.services import create_follow_up
+    from workspace.services import ACTIVE_FOLLOW_UP_STATUSES, create_follow_up, update_follow_up
 
     company = company_for(actor)
 
@@ -384,40 +411,47 @@ def move_lead_to_follow_up(*, actor, lead, data):
                 "assigned_to": "The assigned employee is no longer active in this company."
             })
 
-        # Check whether an active follow-up already exists.
-        # This query intentionally does NOT use select_for_update().
+        # The Lead row is locked for this entire operation, so simultaneous
+        # move requests cannot create duplicate active Follow-ups.
         existing = FollowUp.objects.filter(
             company_id=company.id,
             lead_id=locked.pk,
-            status__in=(
-                FollowUp.Status.PENDING,
-                FollowUp.Status.IN_PROGRESS,
-                FollowUp.Status.POSTPONED,
-                FollowUp.Status.MISSED,
-            ),
+            status__in=ACTIVE_FOLLOW_UP_STATUSES,
         ).order_by(
             "scheduled_at",
             "pk",
         ).first()
 
         if existing:
-            return existing, False
-
-        follow_up_data = {
-            "assigned_to": assignee,
-            "lead": locked,
-            "title": data.get("title") or f"Follow up: {locked.name or locked.phone}",
-            "description": data.get("description", ""),
-            "scheduled_at": data["scheduled_at"],
-            "follow_up_type": data.get("follow_up_type", "CALL"),
-            "priority": data.get("priority", "MEDIUM"),
-            "status": FollowUp.Status.PENDING,
-        }
-
-        follow_up = create_follow_up(
-            actor=actor,
-            data=follow_up_data,
-        )
+            # Reuse the active record and record a reschedule/update instead
+            # of silently discarding the caller's requested next action.
+            follow_up = update_follow_up(
+                actor=actor,
+                follow_up=existing,
+                data={
+                    "assigned_to": assignee,
+                    "title": data.get("title") or existing.title,
+                    "description": data.get("description", existing.description),
+                    "scheduled_at": data["scheduled_at"],
+                    "follow_up_type": data.get("follow_up_type", existing.follow_up_type),
+                    "priority": data.get("priority", existing.priority),
+                    "activity_note": "Updated from the lead workflow",
+                },
+            )
+            created = False
+        else:
+            follow_up_data = {
+                "assigned_to": assignee,
+                "lead": locked,
+                "title": data.get("title") or f"Follow up: {locked.name or locked.phone}",
+                "description": data.get("description", ""),
+                "scheduled_at": data["scheduled_at"],
+                "follow_up_type": data.get("follow_up_type", "CALL"),
+                "priority": data.get("priority", "MEDIUM"),
+                "status": FollowUp.Status.PENDING,
+            }
+            follow_up = create_follow_up(actor=actor, data=follow_up_data)
+            created = True
 
         old_status = locked.status
 
@@ -453,7 +487,7 @@ def move_lead_to_follow_up(*, actor, lead, data):
             },
         )
 
-        return follow_up, True
+        return follow_up, created
 
 
 def add_note(*, actor, lead, note):

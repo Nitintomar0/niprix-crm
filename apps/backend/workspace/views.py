@@ -94,6 +94,12 @@ class ScopedListMixin:
             if len(search) > 200:
                 raise ValidationError({"search": "Must be 200 characters or fewer."})
             queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
+        # Follow-ups keep the linked Lead as the source of truth for CRM
+        # attributes. These filters intentionally traverse that relation.
+        if date_field == "scheduled_at":
+            for key, field in (("temperature", "lead__temperature"), ("source", "lead__source"), ("location", "lead__preferred_location")):
+                if params.get(key):
+                    queryset = queryset.filter(**{f"{field}__icontains" if key == "location" else f"{field}__in": [value.strip() for value in params[key].split(",") if value.strip()]})
         on_date = self._date("date")
         date_from = self._date("date_from")
         date_to = self._date("date_to")

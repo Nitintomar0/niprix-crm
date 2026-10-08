@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from core.audit import log_action
+from core.notifications import notify_company_roles
 from organizations.services import visible_employee_profiles
 
 from .models import LeaveBalance, LeaveRequest
@@ -33,6 +34,16 @@ def create_leave_request(*, actor, employee, leave_type, start_date, end_date, r
         raise ValidationError({"detail": "This request overlaps an existing leave request."})
     request = LeaveRequest.objects.create(company=employee.branch.company, employee=employee, leave_type=leave_type, start_date=start_date, end_date=end_date, number_of_days=leave_days(start_date, end_date), reason=reason)
     log_action(actor=actor, company=request.company, action="leave.requested", target=request)
+    notify_company_roles(
+        company=request.company,
+        roles=["CEO"],
+        notification_type="LEAVE_REQUEST",
+        title="New leave request",
+        body=f"{employee.user.get_full_name() or employee.user.username} requested {leave_type.name}.",
+        href="/leave-requests",
+        metadata={"leave_request_id": request.pk, "employee_id": employee.pk},
+        exclude_user_id=actor.pk,
+    )
     return request
 
 
@@ -77,7 +88,7 @@ def hr_dashboard(*, actor):
     """Return real, tenant-scoped HR operational data in one API response."""
     from attendance.models import AttendanceRecord
     from core.models import AuditLog
-    from organizations.models import EmployeeProfile
+    from leads.models import Lead
     from .models import EmployeeDocument, Holiday
 
     if actor.role == "EMPLOYEE" and not actor.is_superuser:
@@ -137,6 +148,49 @@ def hr_dashboard(*, actor):
             if request.start_date <= day <= request.end_date:
                 trend_counts[str(day)]["on_leave"] += 1
     trend = [{"date": day, **values, "absent": max(0, total_active - values["present"] - values["on_leave"])} for day, values in trend_counts.items()]
+    attendance_by_employee = {
+        item["employee_id"]: item
+        for item in attendance.values("employee_id", "check_in_at", "check_out_at", "status")
+    }
+    workforce_activity = []
+    for profile in active_profiles.order_by("user__username")[:12]:
+        record = attendance_by_employee.get(profile.pk)
+        workforce_activity.append({
+            "employee_id": profile.pk,
+            "employee_name": profile.user.get_full_name() or profile.user.username,
+            "status": "CHECKED_IN" if record and record["check_in_at"] and not record["check_out_at"] else "CHECKED_OUT" if record and record["check_out_at"] else "NOT_CHECKED_IN",
+            "check_in_at": record["check_in_at"] if record else None,
+            "attendance_status": record["status"] if record else None,
+        })
+    contacted_statuses = [
+        Lead.Status.CONTACTED,
+        Lead.Status.SITE_VISIT_REQUESTED,
+        Lead.Status.SITE_VISIT_DONE,
+        Lead.Status.FOLLOW_UP_NEEDED,
+        Lead.Status.FOLLOW_UP_DONE,
+        Lead.Status.POSTPONED,
+        Lead.Status.DIFFERENT_REQUIREMENT,
+        Lead.Status.CLOSED,
+    ]
+    leaderboard = []
+    for profile in active_profiles.annotate(
+        leads_assigned=Count("assigned_leads", filter=Q(assigned_leads__company=company), distinct=True),
+        leads_contacted=Count("assigned_leads", filter=Q(assigned_leads__company=company, assigned_leads__status__in=contacted_statuses), distinct=True),
+        site_visits=Count("assigned_leads", filter=Q(assigned_leads__company=company, assigned_leads__status=Lead.Status.SITE_VISIT_DONE), distinct=True),
+        closings=Count("assigned_leads", filter=Q(assigned_leads__company=company, assigned_leads__status=Lead.Status.CLOSED), distinct=True),
+        follow_ups_completed=Count("assigned_follow_ups", filter=Q(assigned_follow_ups__company=company, assigned_follow_ups__status="COMPLETED"), distinct=True),
+    ).order_by("-closings", "-site_visits", "-leads_assigned", "user__username")[:12]:
+        conversion = round(profile.closings / profile.leads_assigned * 100, 1) if profile.leads_assigned else 0
+        leaderboard.append({
+            "employee_id": profile.pk,
+            "employee_name": profile.user.get_full_name() or profile.user.username,
+            "leads_assigned": profile.leads_assigned,
+            "leads_contacted": profile.leads_contacted,
+            "site_visits": profile.site_visits,
+            "closings": profile.closings,
+            "follow_ups_completed": profile.follow_ups_completed,
+            "conversion_rate": conversion,
+        })
     return {
         "scope": "company" if actor.role == "CEO" or actor.is_superuser else "team",
         "kpis": {
@@ -152,4 +206,6 @@ def hr_dashboard(*, actor):
         "holidays": list(holidays.filter(holiday_date__gte=today).order_by("holiday_date")[:5].values("id", "name", "holiday_date", "description")),
         "documents": {"total": documents.count(), "recent": list(documents.order_by("-created_at")[:5].values("id", "title", "kind", "created_at", "employee__user__username", "employee__employee_code"))},
         "activity": [{"id": item.pk, "action": item.action, "actor": item.actor.username if item.actor else "System", "created_at": item.created_at, "reason": item.reason} for item in activity],
+        "workforce_activity": workforce_activity,
+        "performance": {"leaderboard": leaderboard},
     }

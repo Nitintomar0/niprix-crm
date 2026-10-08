@@ -1,4 +1,4 @@
-type IconName = "home" | "clock" | "users" | "chart" | "calendar" | "logout" | "menu" | "close" | "check" | "arrow" | "shield" | "alert" | "refresh" | "edit" | "building" | "sparkle" | "chevron" | "phone" | "message" | "filter" | "more" | "plus" | "search" | "back";
+type IconName = "home" | "clock" | "users" | "chart" | "calendar" | "logout" | "menu" | "close" | "check" | "arrow" | "shield" | "alert" | "refresh" | "edit" | "building" | "sparkle" | "chevron" | "phone" | "message" | "filter" | "more" | "plus" | "search" | "back" | "bell" | "user" | "trend";
 
 export function Icon({ name, className = "" }: { name: IconName; className?: string }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -27,6 +27,9 @@ export function Icon({ name, className = "" }: { name: IconName; className?: str
     plus: <><path {...common} d="M12 5v14M5 12h14" /></>,
     search: <><circle {...common} cx="10.8" cy="10.8" r="6.8" /><path {...common} d="m16 16 4 4" /></>,
     back: <><path {...common} d="m14.5 5-7 7 7 7M8 12h11" /></>,
+    bell: <><path {...common} d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    user: <><circle {...common} cx="12" cy="8" r="4" /><path {...common} d="M4 21a8 8 0 0 1 16 0" /></>,
+    trend: <><path {...common} d="M3 17 9 11l4 4 8-9" /><path {...common} d="M15 6h6v6" /></>,
   };
   return <svg aria-hidden="true" className={className} viewBox="0 0 24 24">{paths[name]}</svg>;
 }

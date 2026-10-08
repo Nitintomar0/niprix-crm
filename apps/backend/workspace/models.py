@@ -20,7 +20,9 @@ class FollowUp(models.Model):
         OTHER = "OTHER", "Other"
 
     class Status(models.TextChoices):
-        NEW = "NEW", "New"
+        # Historical Lead-state values are retained so legacy rows remain
+        # readable. New Follow-ups use only the workflow states below.
+        NEW = "NEW", "New (legacy)"
         CONTACTED = "CONTACTED", "Contacted"
         SITE_VISIT_REQUESTED = "SITE_VISIT_REQUESTED", "Site Visit Requested"
         SITE_VISIT_DONE = "SITE_VISIT_DONE", "Site Visit Done"
@@ -34,7 +36,7 @@ class FollowUp(models.Model):
         NOT_LOOKING_PROPERTY = "NOT_LOOKING_PROPERTY", "Not Looking Property"
         USER_IS_AGENT = "USER_IS_AGENT", "User Is Agent"
 
-        # Legacy statuses — kept for existing records/API compatibility
+        # Canonical Follow-up workflow states.
         PENDING = "PENDING", "Pending"
         IN_PROGRESS = "IN_PROGRESS", "In progress"
         COMPLETED = "COMPLETED", "Completed"
@@ -79,7 +81,7 @@ class FollowUp(models.Model):
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
-        default=Status.NEW,
+        default=Status.PENDING,
     )
     priority = models.CharField(
         max_length=10,
@@ -262,6 +264,7 @@ class ReminderPreference(models.Model):
         related_name="reminder_preferences",
     )
     upcoming_follow_up_reminders_enabled = models.BooleanField(default=True)
+    overdue_follow_up_reminders_enabled = models.BooleanField(default=True)
     overdue_task_reminders_enabled = models.BooleanField(default=True)
     reminder_lead_minutes = models.PositiveIntegerField(default=30)
     daily_summary_enabled = models.BooleanField(default=False)
@@ -282,6 +285,8 @@ class ReminderEvent(models.Model):
 
     class Kind(models.TextChoices):
         UPCOMING_FOLLOW_UP = "UPCOMING_FOLLOW_UP", "Upcoming follow-up"
+        DUE_FOLLOW_UP = "DUE_FOLLOW_UP", "Due follow-up"
+        OVERDUE_FOLLOW_UP = "OVERDUE_FOLLOW_UP", "Overdue follow-up"
         OVERDUE_TASK = "OVERDUE_TASK", "Overdue task"
 
     company = models.ForeignKey(

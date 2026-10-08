@@ -6,6 +6,7 @@ from django.db.models import Q
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from core.audit import log_action
+from core.notifications import notify_company_roles
 from leads.models import Lead
 from leads.services import company_for, create_or_enrich_lead, normalize_phone
 from organizations.models import EmployeeProfile
@@ -177,4 +178,16 @@ def distribute(user, data):
             "raw_lead_count": len(raw_leads),
             "allocations": [{"employee_id": employee.pk, "count": count} for employee, count in allocations],
         })
+        notify_company_roles(
+            company=company,
+            roles=["CEO"],
+            notification_type="RAW_DATA",
+            title="Raw Data distributed",
+            body=f"{len(created)} raw lead{'s' if len(created) != 1 else ''} moved into the CRM pipeline.",
+            href="/raw-data",
+            metadata={
+                "lead_ids": [lead.pk for lead in created],
+                "allocations": [{"employee_id": employee.pk, "count": count} for employee, count in allocations],
+            },
+        )
     return created, allocations

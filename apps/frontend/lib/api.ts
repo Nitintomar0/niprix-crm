@@ -18,6 +18,7 @@ import {
   type LeadSummary,
   type IntegrationConfiguration,
   type IntegrationEvent,
+  type Notification,
   type EmployeeProfile,
   type EmployeeOverview,
   type EmployeePerformance,
@@ -78,21 +79,21 @@ async function errorFrom(response: Response): Promise<ApiError> {
     );
   }
 
-  function extractMessage(value: unknown): string {
+  function extractMessage(value: unknown, field = ""): string {
     if (typeof value === "string") {
-      return value;
+      return field ? `${field.replace(/\b\w/g, (letter) => letter.toUpperCase())}: ${value}` : value;
     }
 
     if (Array.isArray(value)) {
       return value
-        .map(extractMessage)
+        .map((item) => extractMessage(item, field))
         .filter(Boolean)
         .join(" ");
     }
 
     if (value && typeof value === "object") {
-      return Object.values(value)
-        .map(extractMessage)
+      return Object.entries(value)
+        .map(([key, item]) => extractMessage(item, key === "non_field_errors" || key === "detail" ? "" : key.replaceAll("_", " ")))
         .filter(Boolean)
         .join(" ");
     }
@@ -197,6 +198,10 @@ export const api = {
     return response.json() as Promise<Tokens>;
   },
   me: () => request<User>("/api/auth/me/"),
+  notifications: (page = 1) => request<Paginated<Notification>>(`/api/notifications/?page=${page}&page_size=20`),
+  notificationUnreadCount: () => request<{ count: number }>("/api/notifications/unread-count/"),
+  markNotificationRead: (id: number) => request<Notification>(`/api/notifications/${id}/read/`, { method: "POST", body: "{}" }),
+  markAllNotificationsRead: () => request<void>("/api/notifications/mark-all-read/", { method: "POST", body: "{}" }),
   currentAttendance: () => request<CurrentAttendance>("/api/attendance/current/"),
   checkIn: () => request<AttendanceRecord>("/api/attendance/check-in/", { method: "POST" }),
   checkOut: () => request<AttendanceRecord>("/api/attendance/check-out/", { method: "POST" }),
@@ -269,6 +274,7 @@ export const api = {
   deleteEmployeeDocument: (id: number) => request<void>(`/api/hrms/documents/${id}/`, { method: "DELETE" }),
   workspaceSummary: () => request<WorkspaceSummary>("/api/workspace/summary/"),
   followUps: (query = "") => request<Paginated<FollowUp>>(`/api/follow-ups/?${query}`),
+  followUp: (id: number) => request<FollowUp>(`/api/follow-ups/${id}/`),
   createFollowUp: (body: { title: string; description?: string; assigned_to: number; lead?: number; scheduled_at: string; follow_up_type?: string; priority?: string; status?: string }) => request<FollowUp>("/api/follow-ups/", { method: "POST", body: JSON.stringify(body) }),
   updateFollowUp: (id: number, body: { title?: string; description?: string; assigned_to?: number; scheduled_at?: string; follow_up_type?: string; priority?: string; status?: string; activity_note?: string }) => request<FollowUp>(`/api/follow-ups/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   completeFollowUp: (id: number, note = "") => request<FollowUp>(`/api/follow-ups/${id}/complete/`, { method: "POST", body: JSON.stringify({ note }) }),
@@ -284,6 +290,7 @@ export const api = {
   reminderPreferences: () => request<ReminderPreference>("/api/reminder-preferences/"),
   updateReminderPreferences: (body: Partial<ReminderPreference>) => request<ReminderPreference>("/api/reminder-preferences/", { method: "PATCH", body: JSON.stringify(body) }),
   leads: (query = "") => request<Paginated<Lead>>(`/api/leads/?${query}`),
+  moveLeadToFollowUp: (id: number, body: { title?: string; description?: string; scheduled_at: string; follow_up_type?: string; priority?: string }) => request<{ follow_up: FollowUp; created: boolean }>(`/api/leads/${id}/move-to-follow-up/`, { method: "POST", body: JSON.stringify(body) }),
   lead: (id: number) => request<Lead>(`/api/leads/${id}/`),
   leadSummary: () => request<LeadSummary>("/api/leads/summary/"),
   createLead: (body: Record<string, unknown>) => request<Lead>("/api/leads/", { method: "POST", body: JSON.stringify(body) }),

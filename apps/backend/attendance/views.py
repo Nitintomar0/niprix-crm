@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.audit import log_action
+from core.notifications import notify_company_roles
 from organizations.views import OptionalPageNumberPagination
 from .models import AttendanceCorrection, AttendanceRecord
 from .serializers import AttendanceCorrectionSerializer, AttendanceRecordSerializer
@@ -25,7 +26,18 @@ def profile_for(user):
 class CheckInView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        return Response(AttendanceRecordSerializer(check_in(request.user)).data, status=201)
+        record = check_in(request.user)
+        notify_company_roles(
+            company=record.company,
+            roles=["CEO"],
+            notification_type="ATTENDANCE",
+            title="Employee checked in",
+            body=f"{record.employee.user.username if record.employee_id else record.attendance_user.username} checked in.",
+            href="/attendance",
+            metadata={"attendance_id": record.pk, "employee_id": record.employee_id},
+            exclude_user_id=request.user.pk,
+        )
+        return Response(AttendanceRecordSerializer(record).data, status=201)
 
 
 class CheckOutView(APIView):
@@ -39,6 +51,16 @@ class CheckOutView(APIView):
                 clear_live_location(profile=profile)
             except Exception:
                 pass
+        notify_company_roles(
+            company=record.company,
+            roles=["CEO"],
+            notification_type="ATTENDANCE",
+            title="Employee checked out",
+            body=f"{record.employee.user.username if record.employee_id else record.attendance_user.username} checked out.",
+            href="/attendance",
+            metadata={"attendance_id": record.pk, "employee_id": record.employee_id},
+            exclude_user_id=request.user.pk,
+        )
         return Response(AttendanceRecordSerializer(record).data)
 
 

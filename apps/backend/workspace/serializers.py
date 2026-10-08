@@ -4,7 +4,7 @@ from rest_framework import serializers
 from organizations.models import EmployeeProfile
 
 from .models import FollowUp, FollowUpActivity, ReminderPreference, Task
-from .services import create_follow_up, create_task, update_follow_up, update_task
+from .services import FOLLOW_UP_WORKFLOW_STATUSES, create_follow_up, create_task, update_follow_up, update_task
 
 
 class EmployeeReferenceSerializer(serializers.ModelSerializer):
@@ -41,6 +41,11 @@ class FollowUpSerializer(serializers.ModelSerializer):
     def validate_scheduled_at(self, value):
         if value < timezone.now() and self.instance is None:
             raise serializers.ValidationError("Scheduled time must be in the future when creating a follow-up.")
+        return value
+
+    def validate_status(self, value):
+        if value not in FOLLOW_UP_WORKFLOW_STATUSES:
+            raise serializers.ValidationError("Use a follow-up workflow status (pending, in progress, postponed, completed, cancelled, or missed).")
         return value
 
     def create(self, validated_data):
@@ -90,7 +95,7 @@ class TaskSerializer(serializers.ModelSerializer):
 class ReminderPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReminderPreference
-        fields = ("upcoming_follow_up_reminders_enabled", "overdue_task_reminders_enabled", "reminder_lead_minutes", "daily_summary_enabled", "created_at", "updated_at")
+        fields = ("upcoming_follow_up_reminders_enabled", "overdue_follow_up_reminders_enabled", "overdue_task_reminders_enabled", "reminder_lead_minutes", "daily_summary_enabled", "created_at", "updated_at")
         read_only_fields = ("created_at", "updated_at")
 
     def validate_reminder_lead_minutes(self, value):

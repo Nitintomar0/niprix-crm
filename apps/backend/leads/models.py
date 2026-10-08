@@ -136,6 +136,9 @@ class LeadActivity(models.Model):
         FIELD_CHANGED = "FIELD_CHANGED", "Field changed"
         NOTE_ADDED = "NOTE_ADDED", "Note added"
         FOLLOW_UP_CREATED = "FOLLOW_UP_CREATED", "Follow-up created"
+        FOLLOW_UP_COMPLETED = "FOLLOW_UP_COMPLETED", "Follow-up completed"
+        FOLLOW_UP_RESCHEDULED = "FOLLOW_UP_RESCHEDULED", "Follow-up rescheduled"
+        FOLLOW_UP_REASSIGNED = "FOLLOW_UP_REASSIGNED", "Follow-up reassigned"
         TASK_CREATED = "TASK_CREATED", "Task created"
 
     company = models.ForeignKey("organizations.Company", on_delete=models.PROTECT, related_name="lead_activities")

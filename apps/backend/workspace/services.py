@@ -8,40 +8,47 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from core.audit import log_action
+from core.notifications import create_notification
 from organizations.models import EmployeeProfile
 
 from .models import FollowUp, FollowUpActivity, ReminderEvent, ReminderPreference, Task
 
 
-FOLLOW_UP_WORKFLOW_STATUSES = {
+FOLLOW_UP_WORKFLOW_STATUSES = frozenset({
+    FollowUp.Status.PENDING,
+    FollowUp.Status.IN_PROGRESS,
+    FollowUp.Status.POSTPONED,
+    FollowUp.Status.COMPLETED,
+    FollowUp.Status.CANCELLED,
+    FollowUp.Status.MISSED,
+})
+LEGACY_ACTIVE_FOLLOW_UP_STATUSES = frozenset({
     FollowUp.Status.NEW,
     FollowUp.Status.CONTACTED,
     FollowUp.Status.SITE_VISIT_REQUESTED,
     FollowUp.Status.SITE_VISIT_DONE,
     FollowUp.Status.FOLLOW_UP_NEEDED,
-    FollowUp.Status.FOLLOW_UP_DONE,
-    FollowUp.Status.POSTPONED,
     FollowUp.Status.DIFFERENT_REQUIREMENT,
-    FollowUp.Status.NOT_INTERESTED,
-    FollowUp.Status.CLOSED,
-    FollowUp.Status.INVALID_PHONE,
-    FollowUp.Status.NOT_LOOKING_PROPERTY,
-    FollowUp.Status.USER_IS_AGENT,
-}
+})
+ACTIVE_FOLLOW_UP_STATUSES = frozenset({
+    FollowUp.Status.PENDING,
+    FollowUp.Status.IN_PROGRESS,
+    FollowUp.Status.POSTPONED,
+    FollowUp.Status.MISSED,
+}) | LEGACY_ACTIVE_FOLLOW_UP_STATUSES
 
 FOLLOW_UP_TRANSITIONS = {
-    status: (FOLLOW_UP_WORKFLOW_STATUSES - {status}) | {FollowUp.Status.COMPLETED}
-    for status in FOLLOW_UP_WORKFLOW_STATUSES
-}
-
-# Keep legacy statuses working for existing records.
-FOLLOW_UP_TRANSITIONS.update({
-    FollowUp.Status.PENDING: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
-    FollowUp.Status.IN_PROGRESS: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
+    FollowUp.Status.PENDING: {FollowUp.Status.IN_PROGRESS, FollowUp.Status.POSTPONED, FollowUp.Status.MISSED, FollowUp.Status.COMPLETED, FollowUp.Status.CANCELLED},
+    FollowUp.Status.IN_PROGRESS: {FollowUp.Status.PENDING, FollowUp.Status.POSTPONED, FollowUp.Status.MISSED, FollowUp.Status.COMPLETED, FollowUp.Status.CANCELLED},
+    FollowUp.Status.POSTPONED: {FollowUp.Status.PENDING, FollowUp.Status.IN_PROGRESS, FollowUp.Status.MISSED, FollowUp.Status.COMPLETED, FollowUp.Status.CANCELLED},
+    FollowUp.Status.MISSED: {FollowUp.Status.PENDING, FollowUp.Status.IN_PROGRESS, FollowUp.Status.POSTPONED, FollowUp.Status.COMPLETED, FollowUp.Status.CANCELLED},
     FollowUp.Status.COMPLETED: set(),
     FollowUp.Status.CANCELLED: set(),
-    FollowUp.Status.MISSED: FOLLOW_UP_WORKFLOW_STATUSES | {FollowUp.Status.COMPLETED},
-})
+}
+# Legacy rows are never created again, but may be moved into the canonical
+# workflow without discarding their historic value or activity trail.
+for _legacy_status in LEGACY_ACTIVE_FOLLOW_UP_STATUSES:
+    FOLLOW_UP_TRANSITIONS[_legacy_status] = set(ACTIVE_FOLLOW_UP_STATUSES) | {FollowUp.Status.COMPLETED, FollowUp.Status.CANCELLED}
 
 TASK_TRANSITIONS = {
     Task.Status.TODO: {Task.Status.IN_PROGRESS, Task.Status.BLOCKED, Task.Status.COMPLETED, Task.Status.CANCELLED},
@@ -50,18 +57,6 @@ TASK_TRANSITIONS = {
     Task.Status.COMPLETED: set(),
     Task.Status.CANCELLED: set(),
 }
-ACTIVE_FOLLOW_UP_STATUSES = [
-    FollowUp.Status.NEW,
-    FollowUp.Status.CONTACTED,
-    FollowUp.Status.SITE_VISIT_REQUESTED,
-    FollowUp.Status.SITE_VISIT_DONE,
-    FollowUp.Status.FOLLOW_UP_NEEDED,
-    FollowUp.Status.POSTPONED,
-    FollowUp.Status.DIFFERENT_REQUIREMENT,
-    FollowUp.Status.PENDING,
-    FollowUp.Status.IN_PROGRESS,
-    FollowUp.Status.MISSED,
-]
 ACTIVE_TASK_STATUSES = [Task.Status.TODO, Task.Status.IN_PROGRESS, Task.Status.BLOCKED]
 
 
@@ -143,6 +138,16 @@ def create_follow_up(*, actor, data):
         follow_up = FollowUp.objects.create(company=company, branch=assignee.branch, assigned_to=assignee, created_by=actor, **data)
         _activity(follow_up, actor, FollowUpActivity.Type.CREATED, note=follow_up.description)
         log_action(actor=actor, company=follow_up.company, action="follow_up.created", target=follow_up)
+        if assignee.user_id != actor.pk:
+            create_notification(
+                company=follow_up.company,
+                recipient=assignee.user,
+                notification_type="FOLLOW_UP_ASSIGNED",
+                title="New follow-up assigned",
+                body=follow_up.title,
+                href=f"/follow-ups?follow_up={follow_up.pk}",
+                metadata={"follow_up_id": follow_up.pk, "lead_id": follow_up.lead_id},
+            )
         if lead:
             log_lead_activity(lead=lead, actor=actor, activity_type="FOLLOW_UP_CREATED", note=follow_up.title, metadata={"follow_up_id": follow_up.pk})
     return follow_up
@@ -151,12 +156,12 @@ def create_follow_up(*, actor, data):
 def transition_follow_up(*, actor, follow_up, status, note="", scheduled_at=None):
     if status == follow_up.status and scheduled_at is None:
         return follow_up
-    if status != follow_up.status and status not in FOLLOW_UP_TRANSITIONS[follow_up.status]:
+    if status != follow_up.status and status not in FOLLOW_UP_TRANSITIONS.get(follow_up.status, set()):
         raise ValidationError({"status": f"Cannot change a {follow_up.get_status_display().lower()} follow-up to {status.lower()}."})
     with transaction.atomic():
         follow_up = FollowUp.objects.select_for_update().get(pk=follow_up.pk, company=company_for(actor))
         prior_status, prior_schedule = follow_up.status, follow_up.scheduled_at
-        if status != prior_status and status not in FOLLOW_UP_TRANSITIONS[prior_status]:
+        if status != prior_status and status not in FOLLOW_UP_TRANSITIONS.get(prior_status, set()):
             raise ValidationError({"status": "This status transition is no longer available."})
         if scheduled_at is not None:
             follow_up.scheduled_at = scheduled_at
@@ -174,6 +179,17 @@ def transition_follow_up(*, actor, follow_up, status, note="", scheduled_at=None
         )
         _activity(follow_up, actor, kind, previous_status=prior_status, previous_scheduled_at=prior_schedule, note=note)
         log_action(actor=actor, company=follow_up.company, action=f"follow_up.{status.lower()}", target=follow_up, reason=note)
+        _record_follow_up_lead_history(
+            follow_up=follow_up,
+            actor=actor,
+            activity_type=(
+                "FOLLOW_UP_COMPLETED" if status == FollowUp.Status.COMPLETED
+                else "FOLLOW_UP_RESCHEDULED" if scheduled_at is not None
+                else None
+            ),
+            note=note,
+            metadata={"follow_up_id": follow_up.pk, "status": status},
+        )
     return follow_up
 
 
@@ -181,8 +197,9 @@ def update_follow_up(*, actor, follow_up, data):
     status = data.pop("status", None)
     note = data.pop("activity_note", "")
     assignee = data.pop("assigned_to", None)
+    scheduled_at = data.pop("scheduled_at", None) if status is not None else None
     if status is not None:
-        follow_up = transition_follow_up(actor=actor, follow_up=follow_up, status=status, note=note)
+        follow_up = transition_follow_up(actor=actor, follow_up=follow_up, status=status, note=note, scheduled_at=scheduled_at)
     with transaction.atomic():
         follow_up = FollowUp.objects.select_for_update().get(pk=follow_up.pk, company=company_for(actor))
         old_assignee, old_schedule = follow_up.assigned_to_id, follow_up.scheduled_at
@@ -199,11 +216,94 @@ def update_follow_up(*, actor, follow_up, data):
         follow_up.save()
         if assignee is not None and old_assignee != assignee.pk:
             _activity(follow_up, actor, FollowUpActivity.Type.REASSIGNED, previous_scheduled_at=old_schedule, note=note)
+            _record_follow_up_lead_history(
+                follow_up=follow_up,
+                actor=actor,
+                activity_type="FOLLOW_UP_REASSIGNED",
+                note=note,
+                metadata={"follow_up_id": follow_up.pk, "assigned_to": assignee.pk},
+            )
+            if assignee.user_id != actor.pk:
+                create_notification(
+                    company=follow_up.company,
+                    recipient=assignee.user,
+                    notification_type="FOLLOW_UP_ASSIGNED",
+                    title="Follow-up reassigned to you",
+                    body=follow_up.title,
+                    href=f"/follow-ups?follow_up={follow_up.pk}",
+                    metadata={"follow_up_id": follow_up.pk, "lead_id": follow_up.lead_id},
+                )
         elif data or note:
             activity_type = FollowUpActivity.Type.POSTPONED if "scheduled_at" in data and old_schedule != follow_up.scheduled_at else FollowUpActivity.Type.NOTE_ADDED if note and not data else FollowUpActivity.Type.UPDATED
             _activity(follow_up, actor, activity_type, previous_scheduled_at=old_schedule, note=note)
+            if "scheduled_at" in data and old_schedule != follow_up.scheduled_at:
+                _record_follow_up_lead_history(
+                    follow_up=follow_up,
+                    actor=actor,
+                    activity_type="FOLLOW_UP_RESCHEDULED",
+                    note=note,
+                    metadata={"follow_up_id": follow_up.pk},
+                )
         log_action(actor=actor, company=follow_up.company, action="follow_up.updated", target=follow_up)
     return follow_up
+
+
+def _record_follow_up_lead_history(*, follow_up, actor, activity_type, note="", metadata=None):
+    """Mirror Follow-up lifecycle events into the existing Lead timeline."""
+    if not follow_up.lead_id or not activity_type:
+        return
+    from leads.services import log_lead_activity
+
+    log_lead_activity(
+        lead=follow_up.lead,
+        actor=actor,
+        activity_type=activity_type,
+        note=note or follow_up.title,
+        metadata=metadata or {"follow_up_id": follow_up.pk},
+    )
+
+
+def sync_active_follow_up_owners(*, actor, lead, assignee, note=""):
+    """Keep active Lead work aligned when its owner changes.
+
+    Completed and cancelled Follow-ups intentionally retain their historical
+    assignee. The caller holds the Lead lock, so this also serializes a Lead
+    reassignment with a move-to-follow-up operation.
+    """
+    follow_ups = FollowUp.objects.select_for_update().filter(
+        company=lead.company,
+        lead=lead,
+        status__in=ACTIVE_FOLLOW_UP_STATUSES,
+    ).exclude(assigned_to=assignee)
+    for follow_up in follow_ups:
+        previous_schedule = follow_up.scheduled_at
+        follow_up.assigned_to = assignee
+        follow_up.branch = assignee.branch
+        follow_up.save(update_fields=["assigned_to", "branch", "updated_at"])
+        _activity(
+            follow_up,
+            actor,
+            FollowUpActivity.Type.REASSIGNED,
+            previous_scheduled_at=previous_schedule,
+            note=note or "Synced with lead owner",
+        )
+        _record_follow_up_lead_history(
+            follow_up=follow_up,
+            actor=actor,
+            activity_type="FOLLOW_UP_REASSIGNED",
+            note=note or "Synced with lead owner",
+            metadata={"follow_up_id": follow_up.pk, "assigned_to": assignee.pk},
+        )
+        if assignee.user_id != actor.pk:
+            create_notification(
+                company=follow_up.company,
+                recipient=assignee.user,
+                notification_type="FOLLOW_UP_ASSIGNED",
+                title="Follow-up reassigned to you",
+                body=follow_up.title,
+                href=f"/follow-ups?follow_up={follow_up.pk}",
+                metadata={"follow_up_id": follow_up.pk, "lead_id": follow_up.lead_id},
+            )
 
 
 def reassign_follow_up(*, actor, follow_up, assignee, note=""):
@@ -226,6 +326,16 @@ def create_task(*, actor, data):
                 raise PermissionDenied("Lead is not available.")
         task = Task.objects.create(company=company, branch=assignee.branch, assigned_to=assignee, created_by=actor, **data)
         log_action(actor=actor, company=company, action="task.created", target=task)
+        if assignee.user_id != actor.pk:
+            create_notification(
+                company=company,
+                recipient=assignee.user,
+                notification_type="TASK_ASSIGNED",
+                title="New task assigned",
+                body=task.title,
+                href="/tasks",
+                metadata={"task_id": task.pk, "lead_id": task.lead_id},
+            )
         if lead:
             log_lead_activity(lead=lead, actor=actor, activity_type="TASK_CREATED", note=task.title, metadata={"task_id": task.pk})
     return task
@@ -254,6 +364,7 @@ def update_task(*, actor, task, data):
         task = transition_task(actor=actor, task=task, status=status)
     with transaction.atomic():
         task = Task.objects.select_for_update().get(pk=task.pk, company=company_for(actor))
+        previous_assignee_id = task.assigned_to_id
         if assignee is not None:
             assignee = validate_assignee(actor, assignee)
             task.assigned_to, task.branch = assignee, assignee.branch
@@ -269,6 +380,16 @@ def update_task(*, actor, task, data):
             setattr(task, field, value)
         task.save()
         log_action(actor=actor, company=task.company, action="task.updated", target=task)
+        if assignee is not None and previous_assignee_id != assignee.pk and assignee.user_id != actor.pk:
+            create_notification(
+                company=task.company,
+                recipient=assignee.user,
+                notification_type="TASK_ASSIGNED",
+                title="Task reassigned to you",
+                body=task.title,
+                href="/tasks",
+                metadata={"task_id": task.pk, "lead_id": task.lead_id},
+            )
     return task
 
 
@@ -293,24 +414,75 @@ def get_reminder_preference(user):
     return preference
 
 
-def prepare_reminder_events(*, now=None):
-    """Idempotently persist eligible in-app reminder events; does not deliver them."""
+def _create_follow_up_reminder(*, follow_up, user, kind, source_key, scheduled_for, title, body):
+    event, was_created = ReminderEvent.objects.get_or_create(
+        company=follow_up.company,
+        user=user,
+        source_key=source_key,
+        defaults={"follow_up": follow_up, "kind": kind, "scheduled_for": scheduled_for},
+    )
+    if was_created:
+        create_notification(
+            company=follow_up.company,
+            recipient=user,
+            notification_type="FOLLOW_UP_REMINDER",
+            title=title,
+            body=body,
+            href=f"/follow-ups?follow_up={follow_up.pk}",
+            metadata={"follow_up_id": follow_up.pk, "reminder_event_id": event.pk, "kind": kind},
+        )
+    return event, was_created
+
+
+def prepare_reminder_events(*, now=None, user=None):
+    """Idempotently persist and expose in-app reminders.
+
+    A scheduled worker may call this without ``user``. The notification API
+    also prepares only the requesting user's events, which keeps reminders
+    useful in deployments that have not configured a worker yet.
+    """
     now = now or timezone.now()
     created = []
-    followups = FollowUp.objects.select_related("assigned_to__user", "company").filter(
-        status__in=ACTIVE_FOLLOW_UP_STATUSES,
-        scheduled_at__gte=now,
-        scheduled_at__lte=now + timedelta(days=1),
-    )
+    followups = FollowUp.objects.select_related("assigned_to__user", "company").filter(status__in=ACTIVE_FOLLOW_UP_STATUSES)
+    if user is not None:
+        followups = followups.filter(assigned_to__user=user)
     for follow_up in followups:
         preference = get_reminder_preference(follow_up.assigned_to.user)
-        if not preference.upcoming_follow_up_reminders_enabled or follow_up.scheduled_at > now + timedelta(minutes=preference.reminder_lead_minutes):
-            continue
-        key = f"follow-up:{follow_up.pk}:upcoming:{follow_up.scheduled_at.isoformat()}"
-        event, was_created = ReminderEvent.objects.get_or_create(company=follow_up.company, user=follow_up.assigned_to.user, source_key=key, defaults={"follow_up": follow_up, "kind": ReminderEvent.Kind.UPCOMING_FOLLOW_UP, "scheduled_for": follow_up.scheduled_at})
-        if was_created:
-            created.append(event)
-    for task in Task.objects.select_related("assigned_to__user", "company").filter(task_overdue_q(now)):
+        scheduled_key = follow_up.scheduled_at.isoformat()
+        if preference.upcoming_follow_up_reminders_enabled and now <= follow_up.scheduled_at <= now + timedelta(minutes=preference.reminder_lead_minutes):
+            event, was_created = _create_follow_up_reminder(
+                follow_up=follow_up, user=follow_up.assigned_to.user,
+                kind=ReminderEvent.Kind.UPCOMING_FOLLOW_UP,
+                source_key=f"follow-up:{follow_up.pk}:upcoming:{scheduled_key}",
+                scheduled_for=follow_up.scheduled_at,
+                title="Follow-up coming up",
+                body=f"{follow_up.title} is due at {timezone.localtime(follow_up.scheduled_at):%I:%M %p}.",
+            )
+            if was_created: created.append(event)
+        if follow_up.scheduled_at <= now:
+            event, was_created = _create_follow_up_reminder(
+                follow_up=follow_up, user=follow_up.assigned_to.user,
+                kind=ReminderEvent.Kind.DUE_FOLLOW_UP,
+                source_key=f"follow-up:{follow_up.pk}:due:{scheduled_key}",
+                scheduled_for=follow_up.scheduled_at,
+                title="Follow-up is due now",
+                body=follow_up.title,
+            )
+            if was_created: created.append(event)
+        if preference.overdue_follow_up_reminders_enabled and follow_up.scheduled_at <= now - timedelta(minutes=15):
+            event, was_created = _create_follow_up_reminder(
+                follow_up=follow_up, user=follow_up.assigned_to.user,
+                kind=ReminderEvent.Kind.OVERDUE_FOLLOW_UP,
+                source_key=f"follow-up:{follow_up.pk}:overdue:{scheduled_key}",
+                scheduled_for=follow_up.scheduled_at,
+                title="Follow-up is overdue",
+                body=follow_up.title,
+            )
+            if was_created: created.append(event)
+    tasks = Task.objects.select_related("assigned_to__user", "company").filter(task_overdue_q(now))
+    if user is not None:
+        tasks = tasks.filter(assigned_to__user=user)
+    for task in tasks:
         preference = get_reminder_preference(task.assigned_to.user)
         if not preference.overdue_task_reminders_enabled:
             continue

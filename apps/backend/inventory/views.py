@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.audit import log_action
+from core.notifications import notify_company_roles
 from .models import InventoryItem
 from .serializers import InventoryBulkCreateSerializer, InventoryItemSerializer
 
@@ -82,8 +83,19 @@ class InventoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         can_write(self.request.user)
         if not is_ceo(self.request.user) and "landing" in self.request.data:
             raise PermissionDenied("Only CEOs can update landing.")
+        was_booked = serializer.instance.status in {InventoryItem.Status.BOOKED, InventoryItem.Status.SOLD}
         item = serializer.save()
         log_action(actor=self.request.user, company=item.company, action="inventory.updated", target=item)
+        if not was_booked and item.status in {InventoryItem.Status.BOOKED, InventoryItem.Status.SOLD}:
+            notify_company_roles(
+                company=item.company,
+                roles=["CEO"],
+                notification_type="INVENTORY",
+                title="Inventory unit booked",
+                body=f"{item.project} · Unit {item.unit_number} is now {item.get_status_display().lower()}.",
+                href="/inventory",
+                metadata={"inventory_id": item.pk, "status": item.status},
+            )
 
     def perform_destroy(self, instance):
         can_write(self.request.user)

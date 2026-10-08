@@ -42,6 +42,12 @@ from accounts.views import (
     LogoutView,
     MeView,
 )
+from core.views import (
+    NotificationListView,
+    NotificationMarkAllReadView,
+    NotificationReadView,
+    NotificationUnreadCountView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -58,6 +64,10 @@ urlpatterns = [
     ),
     path("api/auth/me/", MeView.as_view(), name="me"),
     path("api/auth/logout/", LogoutView.as_view(), name="logout"),
+    path("api/notifications/", NotificationListView.as_view(), name="notification-list"),
+    path("api/notifications/unread-count/", NotificationUnreadCountView.as_view(), name="notification-unread-count"),
+    path("api/notifications/mark-all-read/", NotificationMarkAllReadView.as_view(), name="notification-mark-all-read"),
+    path("api/notifications/<int:pk>/read/", NotificationReadView.as_view(), name="notification-read"),
     path(
         "api/auth/ceo-dashboard/",
         CEODashboardView.as_view(),

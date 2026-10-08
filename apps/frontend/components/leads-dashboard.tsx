@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect -- URL state initializes client-side filters. */
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -192,6 +193,13 @@ export function LeadsDashboard({
   const [creating, setCreating] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const latestLoad = useRef(0);
+  useEffect(() => {
+    if (leadId) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedSearch = params.get("search");
+    if (requestedSearch) setSearch(requestedSearch);
+    if (params.get("create") === "1") setCreating(true);
+  }, [leadId]);
   const load = useCallback(async () => {
     if (leadId) return;
     const requestId = ++latestLoad.current;
@@ -214,6 +222,8 @@ export function LeadsDashboard({
         if (dateFilter === "yesterday") { start.setDate(start.getDate() - 1); query.set("date_from", dateValue(start)); query.set("date_to", dateValue(start)); }
         if (dateFilter === "week") { start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); query.set("date_from", dateValue(start)); query.set("date_to", dateValue(end)); }
         if (dateFilter === "month") { start.setDate(1); query.set("date_from", dateValue(start)); query.set("date_to", dateValue(end)); }
+        if (dateFilter === "last_week") { const thisMonday = (start.getDay() + 6) % 7; start.setDate(start.getDate() - thisMonday - 7); end.setDate(start.getDate() + 6); query.set("date_from", dateValue(start)); query.set("date_to", dateValue(end)); }
+        if (dateFilter === "last_month") { start.setDate(1); start.setMonth(start.getMonth() - 1); end.setDate(0); query.set("date_from", dateValue(start)); query.set("date_to", dateValue(end)); }
       }
       if (specificDate) { query.set("date_from", specificDate); query.set("date_to", specificDate); }
       if (dateFrom) query.set("date_from", dateFrom);
@@ -275,7 +285,7 @@ export function LeadsDashboard({
       <select value={source} onChange={(event) => { setPage(1); setSource(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All sources</option>{sources.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select>
       <select value={assignedTo} onChange={(event) => { setPage(1); setAssignedTo(event.target.value); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All permitted owners</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.display_name || employee.username}</option>)}</select>
       <input value={location} onChange={(event) => { setPage(1); setLocation(event.target.value); }} placeholder="Filter location" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
-      <select value={dateFilter} onChange={(event) => { setPage(1); setDateFilter(event.target.value); setSpecificDate(""); setDateFrom(""); setDateTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All received dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This week</option><option value="month">This month</option></select>
+      <select value={dateFilter} onChange={(event) => { setPage(1); setDateFilter(event.target.value); setSpecificDate(""); setDateFrom(""); setDateTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm"><option value="">All received dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This week</option><option value="last_week">Last week</option><option value="month">This month</option><option value="last_month">Last month</option></select>
       <input value={specificDate} onChange={(event) => { setPage(1); setSpecificDate(event.target.value); setDateFilter(""); setDateFrom(""); setDateTo(""); }} type="date" aria-label="Specific lead received date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
       <input value={dateFrom} max={dateTo || undefined} onChange={(event) => { setPage(1); setDateFrom(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received from date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
       <input value={dateTo} min={dateFrom || undefined} onChange={(event) => { setPage(1); setDateTo(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received to date" className="focus-ring rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" />
@@ -391,7 +401,7 @@ export function LeadsDashboard({
             placeholder="Filter location"
             className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"
           />
-          <select value={dateFilter} onChange={(event) => { setPage(1); setDateFilter(event.target.value); setSpecificDate(""); setDateFrom(""); setDateTo(""); }} className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"><option value="">All received dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This week</option><option value="month">This month</option></select>
+          <select value={dateFilter} onChange={(event) => { setPage(1); setDateFilter(event.target.value); setSpecificDate(""); setDateFrom(""); setDateTo(""); }} className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"><option value="">All received dates</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="week">This week</option><option value="last_week">Last week</option><option value="month">This month</option><option value="last_month">Last month</option></select>
           <input value={specificDate} onChange={(event) => { setPage(1); setSpecificDate(event.target.value); setDateFilter(""); setDateFrom(""); setDateTo(""); }} type="date" aria-label="Specific lead received date" className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" />
           <input value={dateFrom} max={dateTo || undefined} onChange={(event) => { setPage(1); setDateFrom(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received from date" className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" />
           <input value={dateTo} min={dateFrom || undefined} onChange={(event) => { setPage(1); setDateTo(event.target.value); setDateFilter(""); setSpecificDate(""); }} type="date" aria-label="Lead received to date" className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" />
@@ -680,16 +690,13 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
     try {
       await api.updateLead(id, { status: nextStatus });
       if (callNote) await api.addLeadNote(id, `Call result: ${callNote}`);
-      if (shouldCreateFollowUp && currentLead.assigned_to && followUpAt) {
-        await api.createFollowUp({
+      if (shouldCreateFollowUp && followUpAt) {
+        await api.moveLeadToFollowUp(id, {
           title: `Follow up with ${empty(currentLead.name)}`,
           description: callNote,
-          assigned_to: currentLead.assigned_to,
-          lead: id,
           scheduled_at: new Date(followUpAt).toISOString(),
           follow_up_type: "CALL",
           priority: "MEDIUM",
-          status: "PENDING",
         });
       }
       setCallLog(false);
