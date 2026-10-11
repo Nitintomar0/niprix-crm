@@ -94,6 +94,13 @@ class IntegrationAPITests(APITestCase):
         self.assertEqual(source.external_conversation_id, "paramshiv-start-1")
         self.assertEqual(source.metadata["questionnaire_version"], "1")
 
+    def test_paused_employee_does_not_receive_integration_leads(self):
+        self.employee.can_receive_leads = False
+        self.employee.save(update_fields=["can_receive_leads"])
+        response = self.signed_post("webhook-whatsapp", {"account_id": "wa-account", "event_id": "paused-employee", "phone": "9876543299"}, "meta-test-secret", "HTTP_X_HUB_SIGNATURE_256")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIsNone(Lead.objects.get().assigned_to)
+
     def test_website_signature_and_no_phone_handling(self):
         payload = {"account_id": "website-form", "event_id": "web-ignored", "name": "No Phone"}
         response = self.signed_post("website-intake", payload, "website-test-secret", "HTTP_X_NIPRIX_SIGNATURE_256")
@@ -113,19 +120,22 @@ class IntegrationAPITests(APITestCase):
         self.client.force_authenticate(self.other_user)
         self.assertEqual(self.client.get(reverse("integration-events")).data["count"], 0)
 
-    def test_manager_hard_deletes_authorized_lead_with_safe_relations(self):
+    def test_protected_relations_block_ceo_deletion_and_manager_is_denied(self):
         lead = Lead.objects.create(company=self.company, branch=self.branch, assigned_to=self.employee, phone="9876543210", normalized_phone="919876543210")
         task = Task.objects.create(company=self.company, branch=self.branch, assigned_to=self.employee, created_by=self.employee_user, title="Task", due_date="2026-10-01", lead=lead)
         follow = FollowUp.objects.create(company=self.company, branch=self.branch, assigned_to=self.employee, created_by=self.employee_user, title="Follow", scheduled_at="2026-10-01T10:00:00Z", lead=lead)
         IntegrationEvent.objects.create(company=self.company, configuration=self.whatsapp, provider="WHATSAPP", idempotency_key="delete-event", lead=lead)
         self.client.force_authenticate(self.manager_user)
         response = self.client.delete(reverse("lead-detail", args=[lead.pk]))
-        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Lead.objects.filter(pk=lead.pk).exists())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.ceo)
+        response = self.client.delete(reverse("lead-detail", args=[lead.pk]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(Lead.objects.filter(pk=lead.pk).exists())
         task.refresh_from_db(); follow.refresh_from_db()
-        self.assertIsNone(task.lead_id); self.assertIsNone(follow.lead_id)
-        self.assertIsNone(IntegrationEvent.objects.get(idempotency_key="delete-event").lead_id)
-        self.assertTrue(AuditLog.objects.filter(action="lead.deleted", target_id=str(lead.pk)).exists())
+        self.assertEqual(task.lead_id, lead.pk); self.assertEqual(follow.lead_id, lead.pk)
+        self.assertEqual(IntegrationEvent.objects.get(idempotency_key="delete-event").lead_id, lead.pk)
+        self.assertFalse(AuditLog.objects.filter(action="lead.deleted", target_id=str(lead.pk)).exists())
 
     def test_employee_cannot_delete_and_manager_cannot_delete_unrelated(self):
         assigned = Lead.objects.create(company=self.company, branch=self.branch, assigned_to=self.employee, phone="9876543210", normalized_phone="919876543210")

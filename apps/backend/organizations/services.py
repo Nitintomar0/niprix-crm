@@ -42,6 +42,33 @@ def validate_reporting_manager(profile, manager):
         cursor = cursor.reporting_manager
 
 
+def set_assignment_eligibility(*, actor, profile, can_receive_leads):
+    """Pause or resume only automatic lead assignment for an employee.
+
+    This deliberately does not touch authentication, active status, leads, or
+    follow-ups. The same employee row is locked by automatic selection in the
+    Lead service, preventing a pause from racing a new round-robin assignment.
+    """
+    if not (actor.is_superuser or actor.role == "CEO"):
+        raise PermissionDenied("Only CEO users can change automatic assignment eligibility.")
+    with transaction.atomic():
+        locked = EmployeeProfile.objects.select_for_update().select_related("user", "branch__company").get(pk=profile.pk)
+        if locked.branch.company_id != actor.company_id:
+            raise PermissionDenied("Employee is not available in your company.")
+        if locked.can_receive_leads == can_receive_leads:
+            return locked, False
+        locked.can_receive_leads = can_receive_leads
+        locked.save(update_fields=["can_receive_leads", "updated_at"])
+        log_action(
+            actor=actor,
+            company=locked.branch.company,
+            action="employee.assignment_resumed" if can_receive_leads else "employee.assignment_paused",
+            target=locked,
+            metadata={"can_receive_leads": can_receive_leads},
+        )
+        return locked, True
+
+
 def deactivate_employee(*, actor, profile):
     """Deactivate an employee without orphaning their live customer work."""
     if not (actor.is_superuser or actor.role == "CEO"):

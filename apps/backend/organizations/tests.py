@@ -228,6 +228,32 @@ class EmployeeAPITests(APITestCase):
         response = self.client.post(reverse("employee-deactivate", args=[self.employee.employee_profile.pk]), format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_ceo_can_pause_and_resume_automatic_assignment_without_touching_work(self):
+        from core.models import AuditLog
+        from leads.models import Lead
+        from workspace.models import FollowUp
+        profile = self.employee.employee_profile
+        lead = Lead.objects.create(company=self.company, branch=self.branch, assigned_to=profile, created_by=self.ceo, phone="9876543210", normalized_phone="919876543210")
+        follow_up = FollowUp.objects.create(company=self.company, branch=self.branch, assigned_to=profile, created_by=self.ceo, lead=lead, title="Existing customer", scheduled_at="2026-12-01T10:00:00Z")
+        self.client.force_authenticate(self.ceo)
+        paused = self.client.post(reverse("employee-assignment-eligibility", args=[profile.pk]), {"can_receive_leads": False}, format="json")
+        self.assertEqual(paused.status_code, status.HTTP_200_OK, paused.data)
+        self.assertFalse(paused.data["employee"]["can_receive_leads"])
+        profile.refresh_from_db(); lead.refresh_from_db(); follow_up.refresh_from_db()
+        self.assertFalse(profile.can_receive_leads)
+        self.assertEqual(lead.assigned_to, profile)
+        self.assertEqual(follow_up.assigned_to, profile)
+        self.assertTrue(AuditLog.objects.filter(action="employee.assignment_paused", target_id=str(profile.pk)).exists())
+        resumed = self.client.post(reverse("employee-assignment-eligibility", args=[profile.pk]), {"can_receive_leads": True}, format="json")
+        self.assertEqual(resumed.status_code, status.HTTP_200_OK, resumed.data)
+        self.assertTrue(resumed.data["employee"]["can_receive_leads"])
+        self.client.force_authenticate(self.employee)
+        denied = self.client.post(reverse("employee-assignment-eligibility", args=[profile.pk]), {"can_receive_leads": False}, format="json")
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.ceo)
+        direct = self.client.patch(reverse("employee-detail", args=[profile.pk]), {"can_receive_leads": False}, format="json")
+        self.assertEqual(direct.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_ceo_history_safe_deletion_hides_an_inactive_employee(self):
         profile = self.employee.employee_profile
         profile.is_active = False

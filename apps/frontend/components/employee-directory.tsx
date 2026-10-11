@@ -18,6 +18,7 @@ export function EmployeeDirectory({ role }: { role: Role }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [creating, setCreating] = useState(false);
+  const [assignmentChangingId, setAssignmentChangingId] = useState<number | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     const query = new URLSearchParams({
@@ -119,6 +120,21 @@ export function EmployeeDirectory({ role }: { role: Role }) {
           ? caught.message
           : "Employee could not be deactivated.",
       );
+    }
+  }
+  async function toggleAssignment(employee: EmployeeProfile) {
+    const action = employee.can_receive_leads ? "pause" : "resume";
+    if (!window.confirm(`${action === "pause" ? "Pause" : "Resume"} automatic lead assignment for ${employee.full_name || employee.username}? Existing leads and follow-ups will remain assigned.`)) return;
+    setAssignmentChangingId(employee.id);
+    setError("");
+    try {
+      const result = await api.setEmployeeAssignmentEligibility(employee.id, !employee.can_receive_leads);
+      setEmployees((current) => current.map((item) => item.id === employee.id ? result.employee : item));
+      setNotice(result.changed ? `Automatic lead assignment ${result.employee.can_receive_leads ? "resumed" : "paused"}.` : "Assignment eligibility was already up to date.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Assignment eligibility could not be updated.");
+    } finally {
+      setAssignmentChangingId(null);
     }
   }
   async function remove(employee: EmployeeProfile) {
@@ -280,6 +296,9 @@ export function EmployeeDirectory({ role }: { role: Role }) {
                       <span className="rounded-full bg-[#eaf7f1] px-2 py-1 text-xs font-semibold text-[#18795b]">
                         {employee.employment_status.replaceAll("_", " ")}
                       </span>
+                      <span className={`ml-2 rounded-full px-2 py-1 text-xs font-semibold ${employee.can_receive_leads ? "bg-[#eaf4ff] text-[#0869d8]" : "bg-[#fff0f1] text-[#b12938]"}`}>
+                        {employee.can_receive_leads ? "Active for assignment" : "Assignment paused"}
+                      </span>
                     </td>
                     <td>{employee.joining_date || "-"}</td>
                     <td className="pr-5 text-right">
@@ -290,6 +309,15 @@ export function EmployeeDirectory({ role }: { role: Role }) {
                         >
                           Open
                         </Link>
+                        {role === "CEO" && employee.is_active && (
+                          <button
+                            disabled={assignmentChangingId === employee.id}
+                            onClick={() => void toggleAssignment(employee)}
+                            className={`font-semibold disabled:opacity-50 ${employee.can_receive_leads ? "text-[#a96908]" : "text-[#168460]"}`}
+                          >
+                            {assignmentChangingId === employee.id ? "Saving…" : employee.can_receive_leads ? "Pause assignment" : "Resume assignment"}
+                          </button>
+                        )}
                         {role === "CEO" && employee.is_active && (
                           <button
                             onClick={() => void deactivate(employee)}
@@ -310,11 +338,8 @@ export function EmployeeDirectory({ role }: { role: Role }) {
           </section>
           <section className="grid gap-3 md:hidden">
             {employees.map((employee) => (
-              <Link
-                href={`/employees/${employee.id}`}
-                key={employee.id}
-                className="bg-white p-4 shadow-sm"
-              >
+              <div key={employee.id} className="bg-white p-4 shadow-sm">
+              <Link href={`/employees/${employee.id}`} className="block">
                 <div className="flex items-center gap-3">
                   <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#dceeff] font-bold text-[#0869d8]">
                     {initials(employee)}
@@ -326,12 +351,12 @@ export function EmployeeDirectory({ role }: { role: Role }) {
                     <p className="text-sm text-[#60708a]">
                       {employee.designation || employee.employee_code}
                     </p>
-                    <p className="mt-1 text-xs text-[#718198]">
-                      {employee.employment_status.replaceAll("_", " ")}
-                    </p>
+                    <p className="mt-1 text-xs text-[#718198]">{employee.employment_status.replaceAll("_", " ")} · {employee.can_receive_leads ? "Active for assignment" : "Assignment paused"}</p>
                   </div>
                 </div>
               </Link>
+              {role === "CEO" && employee.is_active && <button disabled={assignmentChangingId === employee.id} onClick={() => void toggleAssignment(employee)} className={`mt-3 text-sm font-semibold disabled:opacity-50 ${employee.can_receive_leads ? "text-[#a96908]" : "text-[#168460]"}`}>{assignmentChangingId === employee.id ? "Saving…" : employee.can_receive_leads ? "Pause assignment" : "Resume assignment"}</button>}
+              </div>
             ))}
           </section>
         </>

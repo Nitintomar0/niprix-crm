@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path
-from organizations.views import EmployeeCreateView, EmployeeDeactivateView, EmployeeDeleteView, EmployeeDetailView, EmployeeListView
+from organizations.views import EmployeeAssignmentEligibilityView, EmployeeCreateView, EmployeeDeactivateView, EmployeeDeleteView, EmployeeDetailView, EmployeeListView
 from attendance.views import AttendanceListView, AttendanceCorrectionView, AttendanceSummaryView, CheckInView, CheckOutView, CurrentAttendanceView, EmployeeLiveLocationView, LiveLocationSubmitView
 from workspace.views import (
     FollowUpActivityListView, FollowUpCompleteView, FollowUpDetailView, FollowUpListCreateView,
@@ -12,7 +12,8 @@ from workspace.views import (
 )
 from leads.views import (
     LeadActivityListCreateView, LeadAssignmentListView, LeadAssignView, LeadDetailView,
-    LeadListCreateView, LeadMoveToFollowUpView, LeadSourceListView, LeadStatusView, LeadSummaryView, LeadTemperatureView,
+    LeadListCreateView, LeadMarkNotPickedView, LeadMoveToFollowUpView, LeadRecoveryListView,
+    LeadRecoverySummaryView, LeadRestoreView, LeadSourceListView, LeadStatusView, LeadSummaryView, LeadTemperatureView,
 )
 from integrations.views import (
     FacebookWebhookView, InstagramWebhookView, IntegrationConfigurationDetailView,
@@ -92,6 +93,7 @@ urlpatterns = [
     path("api/employees/create/", EmployeeCreateView.as_view(), name="employee-create"),
     path("api/employees/<int:pk>/", EmployeeDetailView.as_view(), name="employee-detail"),
     path("api/employees/<int:pk>/deactivate/", EmployeeDeactivateView.as_view(), name="employee-deactivate"),
+    path("api/employees/<int:pk>/assignment-eligibility/", EmployeeAssignmentEligibilityView.as_view(), name="employee-assignment-eligibility"),
     path("api/employees/<int:pk>/delete/", EmployeeDeleteView.as_view(), name="employee-delete"),
     path("api/employees/<int:pk>/overview/", EmployeeOverviewView.as_view(), name="employee-overview"),
     path("api/employees/<int:pk>/performance/", EmployeePerformanceView.as_view(), name="employee-performance"),
@@ -123,6 +125,8 @@ urlpatterns = [
     path("api/workspace/overdue/", WorkspaceOverdueView.as_view(), name="workspace-overdue"),
     path("api/reminder-preferences/", ReminderPreferenceView.as_view(), name="reminder-preferences"),
     path("api/leads/", LeadListCreateView.as_view(), name="lead-list"),
+    path("api/leads/recovery/", LeadRecoveryListView.as_view(), name="lead-recovery-list"),
+    path("api/leads/recovery/summary/", LeadRecoverySummaryView.as_view(), name="lead-recovery-summary"),
     path("api/raw-data/", RawLeadListCreateView.as_view(), name="raw-lead-list"),
     path("api/raw-data/summary/", RawDataSummaryView.as_view(), name="raw-data-summary"),
     path("api/raw-data/preview/", RawDataPreviewView.as_view(), name="raw-data-preview"),
@@ -137,6 +141,8 @@ urlpatterns = [
     path("api/inventory/<int:pk>/", InventoryDetailView.as_view(), name="inventory-detail"),
     path("api/leads/summary/", LeadSummaryView.as_view(), name="lead-summary"),
     path("api/leads/<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),
+    path("api/leads/<int:pk>/mark-not-picked/", LeadMarkNotPickedView.as_view(), name="lead-mark-not-picked"),
+    path("api/leads/<int:pk>/restore/", LeadRestoreView.as_view(), name="lead-restore"),
     path("api/leads/<int:pk>/assign/", LeadAssignView.as_view(), name="lead-assign"),
     path("api/leads/<int:pk>/status/", LeadStatusView.as_view(), name="lead-status"),
     path("api/leads/<int:pk>/temperature/", LeadTemperatureView.as_view(), name="lead-temperature"),

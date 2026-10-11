@@ -26,12 +26,15 @@ def raw_queryset(user):
     return RawLead.objects.select_related("created_by").filter(company=raw_company_for(user))
 
 
-def eligible_employees(user):
+def eligible_employees(user, *, lock=False):
     company = raw_company_for(user)
-    return EmployeeProfile.objects.select_related("user", "branch").filter(
+    queryset = EmployeeProfile.objects.select_related("user", "branch").filter(
         branch__company=company, user__company=company, user__role="EMPLOYEE",
         is_active=True, user__is_active=True, can_receive_leads=True,
-    ).order_by("pk")
+    )
+    if lock:
+        queryset = queryset.select_for_update()
+    return queryset.order_by("pk")
 
 
 def _clean_value(row, field):
@@ -128,7 +131,9 @@ def _raw_leads_for_request(user, data, lock=False):
 
 
 def allocation_for(user, data, lock=False):
-    people = list(eligible_employees(user).filter(pk__in=data["employee_ids"]))
+    # The distribution path passes lock=True while inside its transaction.
+    # This serializes the current eligibility snapshot with a CEO pause/resume.
+    people = list(eligible_employees(user, lock=lock).filter(pk__in=data["employee_ids"]))
     if len(people) != len(set(data["employee_ids"])):
         raise ValidationError({"employee_ids": "Every employee must be an active eligible employee in your company."})
     people_by_id = {person.pk: person for person in people}

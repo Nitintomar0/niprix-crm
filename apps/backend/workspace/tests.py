@@ -34,7 +34,7 @@ class WorkspaceAPITests(APITestCase):
         return timezone.now() + timedelta(minutes=minutes)
 
     def follow_up_payload(self, **overrides):
-        data = {"title": "Call prospective buyer", "follow_up_type": "CALL", "description": "Confirm site visit", "scheduled_at": self.future().isoformat(), "status": "PENDING", "priority": "HIGH", "assigned_to": self.employee.pk}
+        data = {"title": "Call prospective buyer", "customer_name": "Prospective buyer", "customer_phone": "9876543210", "follow_up_type": "CALL", "description": "Confirm site visit", "scheduled_at": self.future().isoformat(), "status": "PENDING", "priority": "HIGH", "assigned_to": self.employee.pk}
         data.update(overrides)
         return data
 
@@ -58,6 +58,7 @@ class WorkspaceAPITests(APITestCase):
         self.assertEqual(follow_up.follow_up_type, FollowUp.Type.CALL)
         self.assertEqual(follow_up.status, FollowUp.Status.PENDING)
         self.assertEqual(follow_up.priority, "HIGH")
+        self.assertEqual(follow_up.customer_name, "Prospective buyer")
         self.assertEqual(FollowUpActivity.objects.filter(follow_up=follow_up, activity_type=FollowUpActivity.Type.CREATED).count(), 1)
 
     def test_follow_up_choice_labels_are_rejected_but_choice_codes_are_accepted(self):
@@ -74,6 +75,21 @@ class WorkspaceAPITests(APITestCase):
         self.assertEqual(valid.data["follow_up_type"], "CALL")
         self.assertEqual(valid.data["status"], "PENDING")
         self.assertEqual(valid.data["priority"], "HIGH")
+
+    def test_standalone_follow_up_requires_customer_identity_and_terminal_reason(self):
+        self.client.force_authenticate(self.employee_user)
+        missing = self.client.post(reverse("follow-up-list"), {
+            "title": "Anonymous", "assigned_to": self.employee.pk,
+            "scheduled_at": self.future().isoformat(),
+        }, format="json")
+        self.assertEqual(missing.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("customer_name", missing.data)
+        self.assertIn("description", missing.data)
+        invalid_phone = self.client.post(reverse("follow-up-list"), self.follow_up_payload(customer_phone="---"), format="json")
+        self.assertEqual(invalid_phone.status_code, status.HTTP_400_BAD_REQUEST)
+        terminal = self.client.post(reverse("follow-up-list"), self.follow_up_payload(customer_progress="CONVERTED"), format="json")
+        self.assertEqual(terminal.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("outcome_reason", terminal.data)
 
     def test_follow_up_delete_preserves_its_linked_lead_and_tasks(self):
         from leads.models import Lead

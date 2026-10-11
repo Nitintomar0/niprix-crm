@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Icon } from "@/components/icons";
+import { LeadBadge as Badge } from "@/components/lead-badge";
 import type {
   EmployeeOption,
   Lead,
@@ -43,6 +44,9 @@ const sources = [
   "OTHER",
 ];
 const temperatures = ["HOT", "WARM", "COLD"];
+const editableStatuses = statuses.filter(
+  (status) => !["FOLLOW_UP_NEEDED", "FOLLOW_UP_DONE"].includes(status),
+);
 const empty = (value?: string | number | null) =>
   value === null || value === undefined || value === ""
     ? "Not provided"
@@ -73,22 +77,6 @@ const whatsappUrl = (phone: string, employeeName?: string) => {
   return `https://wa.me/${contactNumber(phone)}?text=${encodeURIComponent(message)}`;
 };
 
-function tone(value: string) {
-  if (value === "HOT" || value === "CLOSED")
-    return "bg-[#fff0f1] text-[#b12938]";
-  if (value === "WARM" || value.includes("FOLLOW") || value.includes("SITE"))
-    return "bg-[#fff4e5] text-[#a96908]";
-  return "bg-[#eaf4ff] text-[#0869d8]";
-}
-function Badge({ value }: { value: string }) {
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tone(value)}`}
-    >
-      {label(value)}
-    </span>
-  );
-}
 function Card({ title, value }: { title: string; value: number }) {
   return (
     <div className="app-card rounded-2xl p-4">
@@ -557,6 +545,9 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [callLog, setCallLog] = useState(false);
+  const [moveToFollowUp, setMoveToFollowUp] = useState(false);
+  const [markingNotPicked, setMarkingNotPicked] = useState(false);
+  const [moveNotice, setMoveNotice] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -707,6 +698,47 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
       setBusy(false);
     }
   }
+  async function moveLeadToFollowUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const scheduledAt = String(data.get("scheduled_at") || "");
+    if (!scheduledAt) {
+      setError("Choose the next action date and time.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.moveLeadToFollowUp(id, {
+        title: String(data.get("title") || ""),
+        description: String(data.get("description") || ""),
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        follow_up_type: String(data.get("follow_up_type") || "CALL"),
+        priority: String(data.get("priority") || "MEDIUM"),
+      });
+      setMoveToFollowUp(false);
+      setMoveNotice(result.created ? "Lead moved to Follow-up. The customer is now in the Follow-up workspace." : "The existing active follow-up was updated.");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not move this lead to Follow-up.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function markNotPicked() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.markLeadNotPicked(id);
+      setMarkingNotPicked(false);
+      setMoveNotice("Lead moved to Not Pick Call recovery. Its customer history remains unchanged.");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not move this lead to recovery.");
+    } finally {
+      setBusy(false);
+    }
+  }
   if (deleted)
     return (
       <section className="app-card rounded-2xl p-8">
@@ -724,40 +756,50 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
     );
   return (
     <section className="space-y-5 sm:space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <Link href="/leads" className="text-sm font-semibold text-[#0869d8]">
-            ← Back to leads
+      <div className="rounded-2xl border border-[#dfe8f3] bg-[linear-gradient(135deg,#ffffff_0%,#f2f8ff_100%)] p-4 shadow-[0_12px_30px_rgba(22,55,94,.06)] sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <Link href="/leads" className="focus-ring inline-flex items-center gap-1 text-sm font-bold text-[#0869d8]">
+            <Icon name="back" className="h-4 w-4" /> Back to leads
           </Link>
-          <h1 className="mt-2 text-[24px] font-semibold tracking-tight text-[#203756]">
+          <h1 className="mt-3 truncate text-[25px] font-bold tracking-tight text-[#102b4d] sm:text-[28px]">
             {empty(lead.name)}{" "}
-            <span className="text-base font-medium text-[#7b8ba1]">
+            <span className="text-sm font-semibold text-[#7b8ba1] sm:text-base">
               #{lead.id}
             </span>
           </h1>
-          <p className="mt-1 text-sm text-[#60708a]">Lead received: {new Date(lead.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p>
+          <p className="mt-1 text-sm text-[#60708a]">Received {new Date(lead.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · {lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username || "Unassigned"}</p>
         </div>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          <Badge value={lead.status} />
-          <Badge value={lead.temperature} />
-          {hasUsablePhone(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} onClick={() => setCallLog(true)} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white"><Icon name="phone" className="h-4 w-4" />Call</a>}
-          {hasUsablePhone(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#e9f8ef] px-4 py-2.5 text-sm font-bold text-[#168460]"><Icon name="message" className="h-4 w-4" />WhatsApp</a>}
-          {!hasUsablePhone(lead.phone) && <span className="inline-flex min-h-11 items-center rounded-xl bg-[#f1f4f7] px-4 text-sm font-semibold text-[#718198]">No usable phone number</span>}
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <Badge value={lead.status} /><Badge value={lead.temperature} />
+          {lead.recovery_category && <Badge value={lead.recovery_category} />}
+          {hasUsablePhone(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} onClick={() => setCallLog(true)} className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg bg-[#0869d8] px-3.5 text-sm font-bold text-white shadow-[0_6px_14px_rgba(8,105,216,.18)]"><Icon name="phone" className="h-4 w-4" />Call</a>}
+          {hasUsablePhone(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 text-sm font-bold text-emerald-700"><Icon name="message" className="h-4 w-4" />WhatsApp</a>}
+          {!hasUsablePhone(lead.phone) && <span className="inline-flex h-10 items-center rounded-lg bg-[#f1f4f7] px-3 text-sm font-semibold text-[#718198]">No usable phone</span>}
           <button
             onClick={() => setEditing(true)}
-            className="focus-ring min-h-11 rounded-xl border border-[#0869d8] px-4 py-2 text-sm font-semibold text-[#0869d8]"
+            disabled={busy}
+            className="focus-ring inline-flex h-10 items-center rounded-lg border border-[#aeccec] bg-white px-3.5 text-sm font-bold text-[#155ca8] disabled:opacity-50"
           >
             Edit lead
           </button>
-          {role !== "EMPLOYEE" && (
+          {!lead.recovery_category && <button disabled={busy} onClick={() => setMarkingNotPicked(true)} className="focus-ring inline-flex h-10 items-center rounded-lg border border-[#b9d5f3] bg-[#eef6ff] px-3.5 text-sm font-bold text-[#155ca8] disabled:opacity-50">Not Pick Call</button>}
+          <button
+            disabled={busy || !lead.assigned_to}
+            onClick={() => setMoveToFollowUp(true)}
+            className="focus-ring inline-flex h-10 items-center rounded-lg bg-[#f47b20] px-3.5 text-sm font-bold text-white shadow-[0_6px_14px_rgba(244,123,32,.16)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "Working…" : "Move to Follow-up"}
+          </button>
+          {role === "CEO" && (
             <button
               onClick={() => setConfirmDelete(true)}
-              className="focus-ring min-h-11 rounded-xl border border-[#c43d4b] px-4 py-2 text-sm font-semibold text-[#c43d4b]"
+              className="focus-ring inline-flex h-10 items-center rounded-lg border border-rose-300 bg-white px-3.5 text-sm font-bold text-rose-700"
             >
               Delete lead
             </button>
           )}
-        </div>
+        </div></div>
       </div>
       {error && (
         <p
@@ -887,7 +929,7 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
                 lead.assigned_to_detail?.username ||
                 "Unassigned"}
             </p>
-            {role !== "EMPLOYEE" && (
+            {role === "CEO" && (
               <select
                 value={lead.assigned_to ?? ""}
                 onChange={(event) => void reassign(event.target.value)}
@@ -958,6 +1000,21 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
           </section>
         </aside>
       </div>
+      {moveNotice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{moveNotice}</p>}
+      {markingNotPicked && <Dialog title="Move to Not Pick Call" close={() => setMarkingNotPicked(false)}><div className="mt-5 space-y-5"><p className="text-sm leading-6 text-[#60708a]">This moves lead #{lead.id} out of active Leads into recovery. It does not create a call record or change the customer history.</p><div className="flex justify-end gap-3"><button onClick={() => setMarkingNotPicked(false)} className="focus-ring rounded-lg px-4 py-2.5 text-sm font-bold text-[#60708a]">Cancel</button><button disabled={busy} onClick={() => void markNotPicked()} className="focus-ring rounded-lg bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">{busy ? "Moving…" : "Move to recovery"}</button></div></div></Dialog>}
+      {moveToFollowUp && (
+        <Dialog title="Move to Follow-up" close={() => setMoveToFollowUp(false)}>
+          <form onSubmit={moveLeadToFollowUp} className="mt-5 grid gap-4 sm:grid-cols-2">
+            <p className="sm:col-span-2 text-sm text-[#60708a]">This keeps lead #{lead.id} and its complete history intact, then schedules the next customer action.</p>
+            <Input name="title" label="Next action" required defaultValue={`Follow up with ${empty(lead.name)}`} />
+            <label className="block text-sm font-medium text-[#405773]">Follow-up type<select name="follow_up_type" defaultValue="CALL" className="focus-ring mt-1 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"><option value="CALL">Call</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Email</option><option value="SITE_VISIT">Site visit</option><option value="MEETING">Meeting</option><option value="OTHER">Other</option></select></label>
+            <Input name="scheduled_at" label="Scheduled date & time" type="datetime-local" required />
+            <label className="block text-sm font-medium text-[#405773]">Priority<select name="priority" defaultValue="MEDIUM" className="focus-ring mt-1 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></label>
+            <label className="sm:col-span-2 block text-sm font-medium text-[#405773]">Notes<textarea name="description" className="focus-ring mt-1 min-h-24 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" placeholder="What should happen next?" /></label>
+            <div className="sm:col-span-2 flex justify-end gap-3"><button type="button" onClick={() => setMoveToFollowUp(false)} className="focus-ring rounded-lg px-4 py-2.5 text-sm font-semibold text-[#60708a]">Cancel</button><button disabled={busy} className="focus-ring rounded-lg bg-[#ff8a1f] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">{busy ? "Moving…" : "Move to Follow-up"}</button></div>
+          </form>
+        </Dialog>
+      )}
       {editing && (
         <Dialog title="Edit lead" close={() => setEditing(false)}>
           <form onSubmit={save} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -1003,20 +1060,20 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
             />
             <Input name="bhk" label="BHK" defaultValue={lead.bhk} />
             <Input name="purpose" label="Purpose" defaultValue={lead.purpose} />
-            <label className="block text-sm font-medium text-[#405773]">
-              Status
-              <select
-                name="status"
-                defaultValue={lead.status}
-                className="focus-ring mt-1 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"
-              >
-                {statuses.map((item) => (
-                  <option key={item} value={item}>
-                    {label(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {["FOLLOW_UP_NEEDED", "FOLLOW_UP_DONE"].includes(lead.status) ? (
+              <label className="block text-sm font-medium text-[#405773]">
+                Lead status
+                <input type="hidden" name="status" value={lead.status} />
+                <p className="mt-1 rounded-lg bg-[#fff4e5] px-3 py-2.5 text-sm text-[#a96908]">This historical status is managed through the Follow-up workflow.</p>
+              </label>
+            ) : (
+              <label className="block text-sm font-medium text-[#405773]">
+                Status
+                <select name="status" defaultValue={lead.status} className="focus-ring mt-1 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm">
+                  {editableStatuses.map((item) => <option key={item} value={item}>{label(item)}</option>)}
+                </select>
+              </label>
+            )}
             <label className="block text-sm font-medium text-[#405773]">
               Temperature
               <select
@@ -1057,7 +1114,7 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
           </form>
         </Dialog>
       )}
-      {callLog && <Dialog title="Log call result" close={() => setCallLog(false)}><form onSubmit={logCall} className="mt-4 space-y-4"><p className="text-sm text-[#60708a]">Save the outcome while the conversation is fresh.</p><label className="block text-sm font-medium text-[#405773]">Call outcome<select name="status" defaultValue="CONTACTED" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm">{statuses.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label><label className="block text-sm font-medium text-[#405773]">Notes<textarea name="note" placeholder="What did the lead say?" className="focus-ring mt-1 min-h-24 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><label className="flex min-h-11 items-center gap-3 rounded-xl bg-[#f5f8fc] px-3 text-sm font-semibold text-[#405773]"><input name="create_follow_up" type="checkbox" className="h-4 min-h-0 w-4" />Create a follow-up</label><label className="block text-sm font-medium text-[#405773]">Follow-up date & time<input name="follow_up_at" type="datetime-local" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><button disabled={busy} className="focus-ring flex w-full items-center justify-center rounded-xl bg-[#0869d8] px-4 py-3 text-sm font-bold text-white disabled:opacity-60">{busy ? "Saving…" : "Save call result"}</button></form></Dialog>}
+      {callLog && <Dialog title="Log call result" close={() => setCallLog(false)}><form onSubmit={logCall} className="mt-4 space-y-4"><p className="text-sm text-[#60708a]">Save the outcome while the conversation is fresh.</p><label className="block text-sm font-medium text-[#405773]">Call outcome<select name="status" defaultValue="CONTACTED" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5 text-sm">{editableStatuses.map((item) => <option key={item} value={item}>{label(item)}</option>)}</select></label><label className="block text-sm font-medium text-[#405773]">Notes<textarea name="note" placeholder="What did the lead say?" className="focus-ring mt-1 min-h-24 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><label className="flex min-h-11 items-center gap-3 rounded-xl bg-[#f5f8fc] px-3 text-sm font-semibold text-[#405773]"><input name="create_follow_up" type="checkbox" className="h-4 min-h-0 w-4" />Create a follow-up</label><label className="block text-sm font-medium text-[#405773]">Follow-up date & time<input name="follow_up_at" type="datetime-local" className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><button disabled={busy} className="focus-ring flex w-full items-center justify-center rounded-xl bg-[#0869d8] px-4 py-3 text-sm font-bold text-white disabled:opacity-60">{busy ? "Saving…" : "Save call result"}</button></form></Dialog>}
       {confirmDelete && (
         <Dialog title="Permanently delete lead" close={() => setConfirmDelete(false)}>
           <div className="mt-5 space-y-5">

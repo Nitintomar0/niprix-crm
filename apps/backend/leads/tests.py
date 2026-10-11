@@ -102,7 +102,9 @@ class LeadAPITests(APITestCase):
         self.assertEqual(self.client.post(reverse("lead-status", args=[lead.pk]), {"status": "CONTACTED", "note": "Reached customer"}, format="json").status_code, status.HTTP_200_OK)
         self.assertEqual(self.client.post(reverse("lead-temperature", args=[lead.pk]), {"temperature": "HOT"}, format="json").status_code, status.HTTP_200_OK)
         self.client.force_authenticate(self.manager_user)
-        response = self.client.post(reverse("lead-assign", args=[lead.pk]), {"assigned_to": self.manager.pk, "note": "Manager takeover"}, format="json")
+        self.assertEqual(self.client.post(reverse("lead-assign", args=[lead.pk]), {"assigned_to": self.manager.pk, "note": "Manager takeover"}, format="json").status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.ceo)
+        response = self.client.post(reverse("lead-assign", args=[lead.pk]), {"assigned_to": self.manager.pk, "note": "CEO takeover"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         lead.refresh_from_db()
         self.assertEqual(lead.assigned_to, self.manager)
@@ -130,6 +132,16 @@ class LeadAPITests(APITestCase):
         assigned = [lead.assigned_to_id for lead in created]
         self.assertEqual(assigned, [self.employee.pk, first.pk, second.pk])
         self.assertNotIn(self.unrelated.pk, assigned)
+
+    def test_paused_employee_is_skipped_automatically_but_ceo_can_assign_manually(self):
+        self.employee.can_receive_leads = False
+        self.employee.save(update_fields=["can_receive_leads"])
+        automatic = create_or_enrich_lead(actor=self.ceo, data={"phone": "9876500091", "branch": self.branch}).lead
+        self.assertNotEqual(automatic.assigned_to_id, self.employee.pk)
+        self.client.force_authenticate(self.ceo)
+        manual = self.client.post(reverse("lead-list"), {"phone": "9876500092", "branch": self.branch.pk, "assigned_to": self.employee.pk}, format="json")
+        self.assertEqual(manual.status_code, status.HTTP_201_CREATED, manual.data)
+        self.assertEqual(manual.data["assigned_to"], self.employee.pk)
 
     def test_lead_related_phase_four_records_are_tenant_safe_and_timeline_logged(self):
         lead = self.create_lead()
@@ -186,7 +198,7 @@ class LeadAPITests(APITestCase):
         self.assertIn("scheduled_at", response.data)
         self.assertFalse(FollowUp.objects.filter(lead=lead).exists())
 
-    def test_pagination_filters_and_hard_delete(self):
+    def test_pagination_filters_and_safe_hard_delete(self):
         self.create_lead(name="Rahul", status="NEW")
         self.create_lead(phone="9876543211", name="Aman", status="CONTACTED")
         self.client.force_authenticate(self.employee_user)
@@ -196,8 +208,75 @@ class LeadAPITests(APITestCase):
         lead = Lead.objects.get(name="Aman")
         self.assertEqual(self.client.delete(reverse("lead-detail", args=[lead.pk])).status_code, status.HTTP_403_FORBIDDEN)
         self.client.force_authenticate(self.ceo)
-        self.assertEqual(self.client.delete(reverse("lead-detail", args=[lead.pk])).status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Lead.objects.filter(pk=lead.pk).exists())
+        blocked = self.client.delete(reverse("lead-detail", args=[lead.pk]))
+        self.assertEqual(blocked.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("protected", str(blocked.data))
+        self.assertTrue(Lead.objects.filter(pk=lead.pk).exists())
+        # A record with no protected dependent history may still be deleted.
+        deletable = Lead.objects.create(company=self.company, branch=self.branch, phone="9876543299", normalized_phone="919876543299")
+        self.assertEqual(self.client.delete(reverse("lead-detail", args=[deletable.pk])).status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Lead.objects.filter(pk=deletable.pk).exists())
+
+    def test_not_pick_call_recovery_is_scoped_idempotent_and_restorable(self):
+        lead = self.create_lead(name="No answer", status=Lead.Status.CONTACTED)
+        original_created_at = lead.created_at
+        self.client.force_authenticate(self.employee_user)
+        endpoint = reverse("lead-mark-not-picked", args=[lead.pk])
+        self.assertEqual(self.client.post(endpoint, {"note": "Tried twice"}, format="json").status_code, status.HTTP_200_OK)
+        self.assertEqual(self.client.post(endpoint, {"note": "Tried twice"}, format="json").status_code, status.HTTP_200_OK)
+        lead.refresh_from_db()
+        self.assertEqual(lead.recovery_category, Lead.RecoveryCategory.NOT_PICK_CALL)
+        self.assertEqual(lead.recovery_previous_status, Lead.Status.CONTACTED)
+        self.assertEqual(LeadActivity.objects.filter(lead=lead, activity_type=LeadActivity.Type.RECOVERY_MARKED).count(), 1)
+        self.assertNotIn(lead.pk, [row["id"] for row in self.client.get(reverse("lead-list")).data["results"]])
+        recovery = self.client.get(reverse("lead-recovery-list"), {"category": "NOT_PICK_CALL", "search": "answer", "page_size": 1})
+        self.assertEqual(recovery.status_code, status.HTTP_200_OK, recovery.data)
+        self.assertEqual(recovery.data["count"], 1)
+        self.assertEqual(recovery.data["results"][0]["id"], lead.pk)
+        self.assertIsNotNone(recovery.data["results"][0]["last_activity"])
+        self.assertEqual(self.client.post(reverse("lead-restore", args=[lead.pk]), {}, format="json").status_code, status.HTTP_200_OK)
+        lead.refresh_from_db()
+        self.assertIsNone(lead.recovery_category)
+        self.assertEqual(lead.status, Lead.Status.CONTACTED)
+        self.assertEqual(lead.created_at, original_created_at)
+
+    def test_not_interested_enters_recovery_from_patch_and_status_endpoint(self):
+        for index, endpoint_name in enumerate(("lead-detail", "lead-status"), start=1):
+            lead = self.create_lead(phone=f"987654328{index}", name=f"Not interested {index}", status=Lead.Status.SITE_VISIT_DONE)
+            self.client.force_authenticate(self.employee_user)
+            endpoint = reverse(endpoint_name, args=[lead.pk])
+            method = self.client.patch if endpoint_name == "lead-detail" else self.client.post
+            response = method(endpoint, {"status": Lead.Status.NOT_INTERESTED}, format="json")
+            self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+            lead.refresh_from_db()
+            self.assertEqual(lead.recovery_category, Lead.RecoveryCategory.NOT_INTERESTED)
+            self.assertEqual(lead.recovery_previous_status, Lead.Status.SITE_VISIT_DONE)
+            self.assertNotIn(lead.pk, [row["id"] for row in self.client.get(reverse("lead-list")).data["results"]])
+
+    def test_recovery_follow_up_and_ceo_reassignment_restore_active_owner(self):
+        lead = self.create_lead(name="Recovery workflow", status=Lead.Status.CONTACTED)
+        self.client.force_authenticate(self.employee_user)
+        self.client.post(reverse("lead-mark-not-picked", args=[lead.pk]), {}, format="json")
+        payload = {"scheduled_at": (timezone.now() + timedelta(days=1)).isoformat()}
+        moved = self.client.post(reverse("lead-move-to-follow-up", args=[lead.pk]), payload, format="json")
+        self.assertEqual(moved.status_code, status.HTTP_201_CREATED, moved.data)
+        lead.refresh_from_db()
+        self.assertIsNone(lead.recovery_category)
+        self.assertEqual(lead.status, Lead.Status.FOLLOW_UP_NEEDED)
+
+        handoff = self.create_lead(phone="9876543279", name="Recovery handoff", status=Lead.Status.CONTACTED)
+        self.client.force_authenticate(self.employee_user)
+        self.client.post(reverse("lead-mark-not-picked", args=[handoff.pk]), {}, format="json")
+        self.assertEqual(self.client.post(reverse("lead-assign", args=[handoff.pk]), {"assigned_to": self.manager.pk}, format="json").status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.ceo)
+        reassigned = self.client.post(reverse("lead-assign", args=[handoff.pk]), {"assigned_to": self.manager.pk, "note": "Recovery handoff"}, format="json")
+        self.assertEqual(reassigned.status_code, status.HTTP_200_OK, reassigned.data)
+        handoff.refresh_from_db()
+        self.assertIsNone(handoff.recovery_category)
+        self.assertEqual(handoff.assigned_to, self.manager)
+        self.assertTrue(LeadAssignment.objects.filter(lead=handoff, previous_assignee=self.employee, assigned_to=self.manager).exists())
+        self.client.force_authenticate(self.manager_user)
+        self.assertIn(handoff.pk, [row["id"] for row in self.client.get(reverse("lead-list")).data["results"]])
 
     def test_list_filters_use_backend_values_and_preserve_scope(self):
         hot = self.create_lead(

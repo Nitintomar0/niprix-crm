@@ -39,3 +39,6 @@ out/
 # Private employee uploads
 apps/backend/employee-documents/
 apps/backend/employee-profile-photos/
+
+# Local backup files
+*.save

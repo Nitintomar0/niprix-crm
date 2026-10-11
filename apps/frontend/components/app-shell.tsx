@@ -18,6 +18,7 @@ function titleFor(pathname: string | null) {
   if (pathname?.startsWith("/leave-") || pathname === "/holidays" || pathname === "/employee-documents") return "HR management";
   if (pathname === "/attendance") return "Attendance";
   if (pathname?.startsWith("/leads")) return "Leads";
+  if (pathname === "/lead-recovery") return "Lead Recovery";
   if (pathname === "/follow-ups") return "Follow-ups";
   if (pathname === "/tasks") return "Tasks";
   if (pathname === "/reminders") return "Reminders";
@@ -35,7 +36,7 @@ export function AppShell({ user, children, onLogout }: { user: User; children: R
   const navigation: NavItem[] = [
     { icon: "home", label: "Overview", href: "/", group: "Workspace" },
     ...(user.role !== "EMPLOYEE" ? [{ icon: "chart" as const, label: "HR Dashboard", href: "/hr", group: "Workspace" as const }] : []),
-    { icon: "users", label: "Leads", href: "/leads", group: "Sales" }, { icon: "clock", label: "Follow-ups", href: "/follow-ups", group: "Sales" }, { icon: "check", label: "Tasks", href: "/tasks", group: "Sales" },
+    { icon: "users", label: "Leads", href: "/leads", group: "Sales" }, { icon: "alert", label: "Lead Recovery", href: "/lead-recovery", group: "Sales" }, { icon: "clock", label: "Follow-ups", href: "/follow-ups", group: "Sales" }, { icon: "check", label: "Tasks", href: "/tasks", group: "Sales" },
     ...(user.role === "CEO" ? [{ icon: "users" as const, label: "Raw Data", href: "/raw-data", group: "Sales" as const }] : []),
     { icon: "building", label: "Inventory", href: "/inventory", group: "Operations" }, { icon: "users", label: "People", href: "/employees", group: "Operations" }, { icon: "clock", label: "My attendance", href: "/attendance", group: "Operations" },
     { icon: "alert", label: "Reminders", href: "/reminders", group: "Tools" }, ...(user.role === "CEO" ? [{ icon: "building" as const, label: "Integrations", href: "/integrations", group: "Tools" as const }] : []),

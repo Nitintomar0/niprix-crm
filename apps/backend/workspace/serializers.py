@@ -4,6 +4,8 @@ from rest_framework import serializers
 from organizations.models import EmployeeProfile
 
 from .models import FollowUp, FollowUpActivity, ReminderPreference, Task
+from leads.services import normalize_phone
+
 from .services import FOLLOW_UP_WORKFLOW_STATUSES, create_follow_up, create_task, update_follow_up, update_task
 
 
@@ -25,11 +27,18 @@ class FollowUpSerializer(serializers.ModelSerializer):
     lead_name = serializers.CharField(source="lead.name", read_only=True)
     lead_phone = serializers.CharField(source="lead.phone", read_only=True)
     activity_note = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=2000)
+    lead_property_type = serializers.CharField(source="lead.property_type", read_only=True)
+    lead_preferred_location = serializers.CharField(source="lead.preferred_location", read_only=True)
+    lead_requirement_notes = serializers.CharField(source="lead.requirement_notes", read_only=True)
+    lead_source = serializers.CharField(source="lead.source", read_only=True)
+    lead_temperature = serializers.CharField(source="lead.temperature", read_only=True)
 
     class Meta:
         model = FollowUp
         fields = (
             "id", "company", "branch", "assigned_to", "assigned_to_detail", "created_by", "created_by_name", "lead", "lead_name", "lead_phone",
+            "customer_name", "customer_phone", "customer_progress", "interaction_notes", "outcome_reason", "next_action", "next_action_at",
+            "lead_property_type", "lead_preferred_location", "lead_requirement_notes", "lead_source", "lead_temperature",
             "follow_up_type", "title", "description", "scheduled_at", "status", "priority", "completed_at",
             "activity_note", "created_at", "updated_at",
         )
@@ -47,6 +56,33 @@ class FollowUpSerializer(serializers.ModelSerializer):
         if value not in FOLLOW_UP_WORKFLOW_STATUSES:
             raise serializers.ValidationError("Use a follow-up workflow status (pending, in progress, postponed, completed, cancelled, or missed).")
         return value
+
+    def validate_customer_phone(self, value):
+        if value and not normalize_phone(value):
+            raise serializers.ValidationError("Enter a valid phone number.")
+        return value.strip()
+
+    def validate(self, attrs):
+        lead = attrs.get("lead", getattr(self.instance, "lead", None))
+        name = attrs.get("customer_name", getattr(self.instance, "customer_name", "")).strip()
+        phone = attrs.get("customer_phone", getattr(self.instance, "customer_phone", "")).strip()
+        if not lead:
+            errors = {}
+            if not name:
+                errors["customer_name"] = "Customer name is required for a standalone follow-up."
+            if not phone:
+                errors["customer_phone"] = "Customer phone is required for a standalone follow-up."
+            description = attrs.get("description", getattr(self.instance, "description", "")).strip()
+            if not description:
+                errors["description"] = "Description is required for a standalone follow-up."
+            if errors:
+                raise serializers.ValidationError(errors)
+        progress = attrs.get("customer_progress", getattr(self.instance, "customer_progress", ""))
+        if progress in {"CONVERTED", "NOT_INTERESTED", "CANCELLED", "INVALID_CONTACT"}:
+            outcome = attrs.get("outcome_reason", getattr(self.instance, "outcome_reason", "")).strip()
+            if not outcome:
+                raise serializers.ValidationError({"outcome_reason": "Record an outcome or reason for this terminal customer progress."})
+        return attrs
 
     def create(self, validated_data):
         return create_follow_up(actor=self.context["request"].user, data=validated_data)

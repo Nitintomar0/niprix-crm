@@ -43,6 +43,22 @@ class FollowUp(models.Model):
         CANCELLED = "CANCELLED", "Cancelled"
         MISSED = "MISSED", "Missed"
 
+    class CustomerProgress(models.TextChoices):
+        CONTACTED = "CONTACTED", "Contacted"
+        CONTACT_ATTEMPTED = "CONTACT_ATTEMPTED", "Contact attempted"
+        INTERESTED = "INTERESTED", "Interested"
+        FOLLOW_UP_REQUIRED = "FOLLOW_UP_REQUIRED", "Follow-up required"
+        SITE_VISIT_REQUESTED = "SITE_VISIT_REQUESTED", "Site visit requested"
+        SITE_VISIT_SCHEDULED = "SITE_VISIT_SCHEDULED", "Site visit scheduled"
+        SITE_VISIT_DONE = "SITE_VISIT_DONE", "Site visit done"
+        NEGOTIATION = "NEGOTIATION", "Negotiation"
+        BOOKING_IN_PROGRESS = "BOOKING_IN_PROGRESS", "Booking in progress"
+        CONVERTED = "CONVERTED", "Converted / closed won"
+        NOT_INTERESTED = "NOT_INTERESTED", "Not interested"
+        POSTPONED = "POSTPONED", "Postponed"
+        CANCELLED = "CANCELLED", "Cancelled"
+        INVALID_CONTACT = "INVALID_CONTACT", "Invalid contact"
+
     company = models.ForeignKey(
         "organizations.Company",
         on_delete=models.PROTECT,
@@ -70,6 +86,19 @@ class FollowUp(models.Model):
         on_delete=models.SET_NULL,
         related_name="follow_ups",
     )
+    # Linked follow-ups use Lead as the identity source. These fields support
+    # legitimate standalone customer workflows without inventing a Lead.
+    customer_name = models.CharField(max_length=255, blank=True)
+    customer_phone = models.CharField(max_length=32, blank=True)
+    customer_progress = models.CharField(
+        max_length=32,
+        choices=CustomerProgress.choices,
+        default=CustomerProgress.FOLLOW_UP_REQUIRED,
+    )
+    interaction_notes = models.TextField(blank=True)
+    outcome_reason = models.TextField(blank=True)
+    next_action = models.CharField(max_length=255, blank=True)
+    next_action_at = models.DateTimeField(null=True, blank=True)
     follow_up_type = models.CharField(
         max_length=20,
         choices=Type.choices,

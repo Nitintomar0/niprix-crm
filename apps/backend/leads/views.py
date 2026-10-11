@@ -1,7 +1,7 @@
 from datetime import date
 import logging
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -13,9 +13,13 @@ from rest_framework.views import APIView
 from .models import Lead, LeadActivity, LeadAssignment, LeadSource
 from .serializers import (
     LeadActivitySerializer, LeadAssignmentSerializer, LeadNoteSerializer, LeadReassignSerializer,
-    LeadMoveToFollowUpSerializer, LeadSerializer, LeadSourceSerializer, LeadStatusSerializer, LeadTemperatureSerializer,
+    LeadMoveToFollowUpSerializer, LeadRecoveryActionSerializer, LeadRecoverySerializer, LeadSerializer,
+    LeadSourceSerializer, LeadStatusSerializer, LeadTemperatureSerializer,
 )
-from .services import add_note, company_for, delete_lead, lead_queryset, move_lead_to_follow_up, reassign_lead, update_lead
+from .services import (
+    add_note, company_for, delete_lead, lead_queryset, mark_lead_recovery,
+    move_lead_to_follow_up, reassign_lead, restore_lead_from_recovery, update_lead,
+)
 from workspace.serializers import FollowUpSerializer
 
 
@@ -39,13 +43,17 @@ class ScopedLeadListMixin:
         except ValueError:
             raise ValidationError({name: "Use ISO date format YYYY-MM-DD."})
 
-    def filtered_queryset(self):
+    def filtered_queryset(self, *, include_recovery=False):
         params = self.request.query_params
         # The unfiltered Leads workspace is the active inbox. An explicit status
         # filter is a deliberate lookup and must be able to return every valid
         # lead status, including FOLLOW_UP_NEEDED.
         queryset = lead_queryset(self.request.user)
-        if not params.get("status"):
+        if not include_recovery:
+            # A lead is either active or in recovery, never both. This remains
+            # true even when an explicit status filter is supplied.
+            queryset = queryset.filter(recovery_category__isnull=True)
+        if not include_recovery and not params.get("status"):
             queryset = queryset.exclude(status=Lead.Status.FOLLOW_UP_NEEDED)
         if params.get("search"):
             search = params["search"].strip()
@@ -107,6 +115,36 @@ class LeadListCreateView(ScopedLeadListMixin, generics.ListCreateAPIView):
         return self.filtered_queryset()
 
 
+class LeadRecoveryListView(ScopedLeadListMixin, generics.ListAPIView):
+    serializer_class = LeadRecoverySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        category = self.request.query_params.get("category")
+        if category not in Lead.RecoveryCategory.values:
+            raise ValidationError({"category": "Choose NOT_PICK_CALL or NOT_INTERESTED."})
+        return self.filtered_queryset(include_recovery=True).filter(
+            recovery_category=category,
+        ).prefetch_related(
+            Prefetch(
+                "activities",
+                queryset=LeadActivity.objects.select_related("performed_by").order_by("-created_at", "-id"),
+                to_attr="recovery_activities",
+            )
+        ).order_by("-recovery_at", "-id")
+
+
+class LeadRecoverySummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = lead_queryset(request.user).filter(recovery_category__isnull=False)
+        return Response({
+            "not_pick_call": queryset.filter(recovery_category=Lead.RecoveryCategory.NOT_PICK_CALL).count(),
+            "not_interested": queryset.filter(recovery_category=Lead.RecoveryCategory.NOT_INTERESTED).count(),
+        })
+
+
 class LeadDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = LeadSerializer
     permission_classes = [IsAuthenticated]
@@ -159,6 +197,35 @@ class LeadAssignView(APIView):
         serializer.is_valid(raise_exception=True)
         lead = _lead_or_denied(request.user, pk)
         updated = reassign_lead(actor=request.user, lead=lead, assignee=serializer.validated_data["assigned_to"], reason=serializer.validated_data.get("note", ""))
+        return Response(LeadSerializer(updated, context={"request": request}).data)
+
+
+class LeadMarkNotPickedView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = LeadRecoveryActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead = _lead_or_denied(request.user, pk)
+        updated = mark_lead_recovery(
+            actor=request.user,
+            lead=lead,
+            category=Lead.RecoveryCategory.NOT_PICK_CALL,
+            reason=serializer.validated_data.get("note", ""),
+        )
+        return Response(LeadSerializer(updated, context={"request": request}).data)
+
+
+class LeadRestoreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = LeadRecoveryActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead = _lead_or_denied(request.user, pk)
+        updated = restore_lead_from_recovery(
+            actor=request.user, lead=lead, reason=serializer.validated_data.get("note", ""),
+        )
         return Response(LeadSerializer(updated, context={"request": request}).data)
 
 

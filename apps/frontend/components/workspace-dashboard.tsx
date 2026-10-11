@@ -15,6 +15,7 @@ import {
   type EmployeeOption,
   type FollowUp,
   type FollowUpActivity,
+  type Lead,
   type Role,
   type Task,
   type WorkspaceSummary,
@@ -36,6 +37,12 @@ const followUpStatuses = [
   "MISSED",
   "CANCELLED",
   "COMPLETED",
+] as const;
+const customerProgresses = [
+  "CONTACTED", "CONTACT_ATTEMPTED", "INTERESTED", "FOLLOW_UP_REQUIRED",
+  "SITE_VISIT_REQUESTED", "SITE_VISIT_SCHEDULED", "SITE_VISIT_DONE",
+  "NEGOTIATION", "BOOKING_IN_PROGRESS", "CONVERTED", "NOT_INTERESTED",
+  "POSTPONED", "CANCELLED", "INVALID_CONTACT",
 ] as const;
 const taskStatuses = ["TODO", "IN_PROGRESS", "BLOCKED", "CANCELLED"] as const;
 
@@ -209,6 +216,8 @@ export function WorkDashboard({
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [rows, setRows] = useState<(FollowUp | Task)[]>([]);
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [availableLeads, setAvailableLeads] = useState<Lead[]>([]);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -240,17 +249,19 @@ export function WorkDashboard({
     if (isFollowUp && location) query.set("location", location);
     if (isFollowUp && scheduledDate) query.set("date", scheduledDate);
     try {
-      const [nextSummary, listed, people] = await Promise.all([
+      const [nextSummary, listed, people, leads] = await Promise.all([
         api.workspaceSummary(),
         isFollowUp
           ? api.followUps(query.toString())
           : api.tasks(query.toString()),
         api.employees(),
+        isFollowUp ? api.leads("page=1&page_size=100") : Promise.resolve(null),
       ]);
       setSummary(nextSummary);
       setRows(listed.results);
       setTotal(listed.count);
       setEmployees(Array.isArray(people) ? people : people.results);
+      setAvailableLeads(leads?.results || []);
     } catch (caught) {
       setError(
         caught instanceof ApiError && caught.status === 403
@@ -340,6 +351,14 @@ export function WorkDashboard({
           ).toISOString(),
           priority: String(data.get("priority")),
           status: String(data.get("status")),
+          lead: data.get("lead") ? Number(data.get("lead")) : undefined,
+          customer_name: String(data.get("customer_name") || ""),
+          customer_phone: String(data.get("customer_phone") || ""),
+          customer_progress: String(data.get("customer_progress") || "FOLLOW_UP_REQUIRED"),
+          interaction_notes: String(data.get("interaction_notes") || ""),
+          outcome_reason: String(data.get("outcome_reason") || ""),
+          next_action: String(data.get("next_action") || ""),
+          next_action_at: data.get("next_action_at") ? new Date(String(data.get("next_action_at"))).toISOString() : null,
         };
         if (form && form !== "new") await api.updateFollowUp(form.id, payload);
         else await api.createFollowUp(payload);
@@ -384,6 +403,7 @@ export function WorkDashboard({
     }
   }
   const canAssign = role !== "EMPLOYEE";
+  const selectedLead = availableLeads.find((lead) => String(lead.id) === selectedLeadId);
   return (
     <section>
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -403,7 +423,7 @@ export function WorkDashboard({
           </p>
         </div>
         <button
-          onClick={() => setForm("new")}
+          onClick={() => { setSelectedLeadId(""); setForm("new"); }}
           className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
         >
           <Icon name="plus" className="h-4 w-4" /> Create {isFollowUp ? "follow-up" : "task"}
@@ -502,18 +522,18 @@ export function WorkDashboard({
               const owner = followUp.assigned_to_detail.display_name || followUp.assigned_to_detail.username;
               return <article key={followUp.id} className="rounded-2xl border border-[#e5ebf3] bg-[#fbfdff] p-5 shadow-sm transition-shadow hover:shadow-md">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><p className="text-xs font-semibold tracking-[.1em] text-[#0869d8]">FOLLOW-UP #{followUp.id}</p><h3 className="mt-1 text-lg font-semibold text-[#203756]">{followUp.lead_name || followUp.title}</h3><p className="mt-1 text-sm text-[#60708a]">{followUp.lead_phone || "No linked customer number"}</p></div>
+                  <div><p className="text-xs font-semibold tracking-[.1em] text-[#0869d8]">FOLLOW-UP #{followUp.id}</p><h3 className="mt-1 text-lg font-semibold text-[#203756]">{followUp.lead_name || followUp.customer_name || followUp.title}</h3><p className="mt-1 text-sm text-[#60708a]">{followUp.lead_phone || followUp.customer_phone || "No customer number"}</p></div>
                   <div className="flex flex-wrap gap-2">{badge(followUp.status)}{badge(followUp.priority)}</div>
                 </div>
                 <div className="mt-4 grid gap-3 border-y border-[#edf1f5] py-4 text-sm sm:grid-cols-2">
                   <div><p className="text-xs font-semibold uppercase tracking-[.08em] text-[#8291a4]">Scheduled</p><p className="mt-1 font-medium text-[#405773]">{new Date(followUp.scheduled_at).toLocaleString()}</p></div>
                   <div><p className="text-xs font-semibold uppercase tracking-[.08em] text-[#8291a4]">Owner</p><p className="mt-1 font-medium text-[#405773]">{owner}</p></div>
-                  <div className="sm:col-span-2"><p className="text-xs font-semibold uppercase tracking-[.08em] text-[#8291a4]">Follow-up</p><p className="mt-1 text-[#60708a]">{followUp.title}{followUp.description ? ` · ${followUp.description}` : ""}</p></div>
+                  <div className="sm:col-span-2"><p className="text-xs font-semibold uppercase tracking-[.08em] text-[#8291a4]">Customer progress</p><p className="mt-1 text-[#60708a]">{label(followUp.customer_progress)} · {followUp.title}{followUp.description ? ` · ${followUp.description}` : ""}</p></div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {hasUsablePhone(followUp.lead_phone) && <a href={`tel:${contactNumber(followUp.lead_phone)}`} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-xl bg-[#e9f6f1] px-3 py-2 text-xs font-semibold text-[#168460]"><Icon name="phone" className="h-3.5 w-3.5" />Call</a>}
-                  {hasUsablePhone(followUp.lead_phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(followUp.lead_phone, owner)} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-xl bg-[#e9f6f1] px-3 py-2 text-xs font-semibold text-[#168460]"><Icon name="message" className="h-3.5 w-3.5" />WhatsApp</a>}
-                  <button onClick={() => setForm(followUp)} className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2 text-xs font-semibold text-[#0869d8]">Edit</button>
+                  {hasUsablePhone(followUp.lead_phone || followUp.customer_phone) && <a href={`tel:${contactNumber(followUp.lead_phone || followUp.customer_phone)}`} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-xl bg-[#e9f6f1] px-3 py-2 text-xs font-semibold text-[#168460]"><Icon name="phone" className="h-3.5 w-3.5" />Call</a>}
+                  {hasUsablePhone(followUp.lead_phone || followUp.customer_phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(followUp.lead_phone || followUp.customer_phone, owner)} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded-xl bg-[#e9f6f1] px-3 py-2 text-xs font-semibold text-[#168460]"><Icon name="message" className="h-3.5 w-3.5" />WhatsApp</a>}
+                  <button onClick={() => { setSelectedLeadId(String(followUp.lead || "")); setForm(followUp); }} className="focus-ring rounded-lg border border-[#dce4ee] px-3 py-2 text-xs font-semibold text-[#0869d8]">Edit</button>
                   {!done && <button disabled={busy} onClick={() => void complete(followUp)} className="focus-ring rounded-lg border border-[#b9e5d5] px-3 py-2 text-xs font-semibold text-[#168460] disabled:opacity-50">Complete</button>}
                   <button onClick={() => { setAction(followUp); setActivities(null); }} className="focus-ring rounded-lg border border-[#f5d9a6] px-3 py-2 text-xs font-semibold text-[#a96908]">Postpone</button>
                   {!done && <button disabled={busy} onClick={() => void removeFollowUp(followUp)} className="focus-ring rounded-lg border border-[#f0c7cd] px-3 py-2 text-xs font-semibold text-[#b12938] disabled:opacity-50">Delete</button>}
@@ -649,6 +669,10 @@ export function WorkDashboard({
             </label>
             {isFollowUp ? (
               <>
+                <label className="sm:col-span-2 block text-sm font-medium text-[#405773]">Linked lead (optional)<Select name="lead" value={form === "new" ? selectedLeadId : String((form as FollowUp).lead || "")} onChange={(value) => setSelectedLeadId(value)}><option value="">Standalone customer follow-up</option>{availableLeads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name || lead.phone} · {lead.phone}</option>)}</Select></label>
+                <Input key={`customer-name-${selectedLeadId}-${form === "new" ? "new" : form.id}`} name="customer_name" label="Customer name" required={!selectedLead && (form === "new" || !(form as FollowUp).lead)} defaultValue={selectedLead?.name || (form === "new" ? "" : (form as FollowUp).customer_name)} />
+                <Input key={`customer-phone-${selectedLeadId}-${form === "new" ? "new" : form.id}`} name="customer_phone" label="Customer phone" required={!selectedLead && (form === "new" || !(form as FollowUp).lead)} defaultValue={selectedLead?.phone || (form === "new" ? "" : (form as FollowUp).customer_phone)} />
+                <label className="block text-sm font-medium text-[#405773]">Customer progress<Select name="customer_progress" value={form === "new" ? "FOLLOW_UP_REQUIRED" : (form as FollowUp).customer_progress}>{customerProgresses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label>
                 <label className="block text-sm font-medium text-[#405773]">
                   Follow-up type
                   <Select
@@ -677,6 +701,8 @@ export function WorkDashboard({
                       : localDateTime((form as FollowUp).scheduled_at)
                   }
                 />
+                <Input name="next_action" label="Next action" defaultValue={form === "new" ? "" : (form as FollowUp).next_action} />
+                <Input name="next_action_at" label="Next-action date & time" type="datetime-local" defaultValue={form === "new" ? "" : localDateTime((form as FollowUp).next_action_at)} />
               </>
             ) : (
               <>
@@ -733,10 +759,12 @@ export function WorkDashboard({
               Description
               <textarea
                 name="description"
+                required={isFollowUp && !selectedLead && (form === "new" || !(form as FollowUp).lead)}
                 defaultValue={form === "new" ? "" : form.description}
                 className="focus-ring mt-1 min-h-24 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm"
               />
             </label>
+            {isFollowUp && <><label className="sm:col-span-2 block text-sm font-medium text-[#405773]">Interaction notes<textarea name="interaction_notes" defaultValue={form === "new" ? "" : (form as FollowUp).interaction_notes} className="focus-ring mt-1 min-h-20 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" /></label><label className="sm:col-span-2 block text-sm font-medium text-[#405773]">Outcome / terminal reason<textarea name="outcome_reason" defaultValue={form === "new" ? "" : (form as FollowUp).outcome_reason} className="focus-ring mt-1 min-h-20 w-full rounded-lg border border-[#dce4ee] px-3 py-2.5 text-sm" placeholder="Required for converted, not interested, cancelled, or invalid contact" /></label></>}
             <div className="sm:col-span-2 flex justify-end gap-3">
               <button
                 type="button"
@@ -761,7 +789,7 @@ export function WorkDashboard({
         </Dialog>
       )}
       {filtersOpen && <Dialog title={`Filter ${isFollowUp ? "follow-ups" : "tasks"}`} close={() => setFiltersOpen(false)}><div className="mt-4 grid gap-3"><label className="text-sm font-medium text-[#405773]">Status<Select name="filter-status-mobile" value={status} onChange={(value) => { setPage(1); setStatus(value); }}><option value="">All statuses</option>{(isFollowUp ? followUpStatuses : [...taskStatuses, "COMPLETED"]).map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Priority<Select name="filter-priority-mobile" value={priority} onChange={(value) => { setPage(1); setPriority(value); }}><option value="">All priorities</option>{priorities.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></label><label className="text-sm font-medium text-[#405773]">Owner<Select name="filter-owner-mobile" value={assignedTo} onChange={(value) => { setPage(1); setAssignedTo(value); }}><option value="">All permitted owners</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.display_name || employee.username}</option>)}</Select></label></div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={() => { setPage(1); setStatus(""); setPriority(""); setAssignedTo(""); }} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></Dialog>}
-      {focusedFollowUp && <Dialog title="Follow-up details" close={() => setFocusedFollowUp(null)}><div className="mt-5 space-y-4"><div><p className="text-xs font-semibold tracking-[.1em] text-[#0869d8]">FOLLOW-UP #{focusedFollowUp.id}</p><h3 className="mt-1 text-xl font-semibold text-[#203756]">{focusedFollowUp.title}</h3><p className="mt-1 text-sm text-[#60708a]">{focusedFollowUp.lead_name || "No linked lead"}{focusedFollowUp.lead_phone ? ` · ${focusedFollowUp.lead_phone}` : ""}</p></div><div className="grid gap-3 rounded-xl bg-[#f6f9fd] p-4 text-sm sm:grid-cols-2"><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Scheduled</strong>{new Date(focusedFollowUp.scheduled_at).toLocaleString()}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Owner</strong>{focusedFollowUp.assigned_to_detail.display_name || focusedFollowUp.assigned_to_detail.username}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Status</strong>{label(focusedFollowUp.status)}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Priority</strong>{label(focusedFollowUp.priority)}</p></div>{focusedFollowUp.description && <p className="text-sm leading-6 text-[#526984]">{focusedFollowUp.description}</p>}<div className="flex justify-end"><button onClick={() => { setForm(focusedFollowUp); setFocusedFollowUp(null); }} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white">Edit follow-up</button></div></div></Dialog>}
+      {focusedFollowUp && <Dialog title="Follow-up details" close={() => setFocusedFollowUp(null)}><div className="mt-5 space-y-4"><div><p className="text-xs font-semibold tracking-[.1em] text-[#0869d8]">FOLLOW-UP #{focusedFollowUp.id}</p><h3 className="mt-1 text-xl font-semibold text-[#203756]">{focusedFollowUp.lead_name || focusedFollowUp.customer_name || focusedFollowUp.title}</h3><p className="mt-1 text-sm text-[#60708a]">{focusedFollowUp.lead_phone || focusedFollowUp.customer_phone || "No customer number"}</p></div><div className="grid gap-3 rounded-xl bg-[#f6f9fd] p-4 text-sm sm:grid-cols-2"><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Customer progress</strong>{label(focusedFollowUp.customer_progress)}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Next action</strong>{focusedFollowUp.next_action || "Not recorded"}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Scheduled</strong>{new Date(focusedFollowUp.scheduled_at).toLocaleString()}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Owner</strong>{focusedFollowUp.assigned_to_detail.display_name || focusedFollowUp.assigned_to_detail.username}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Status</strong>{label(focusedFollowUp.status)}</p><p><strong className="block text-xs uppercase tracking-wide text-[#8291a4]">Priority</strong>{label(focusedFollowUp.priority)}</p></div>{(focusedFollowUp.lead_property_type || focusedFollowUp.lead_preferred_location || focusedFollowUp.lead_requirement_notes) && <p className="rounded-xl bg-[#f6f9fd] p-4 text-sm leading-6 text-[#526984]">{[focusedFollowUp.lead_property_type, focusedFollowUp.lead_preferred_location, focusedFollowUp.lead_requirement_notes].filter(Boolean).join(" · ")}</p>}{focusedFollowUp.description && <p className="text-sm leading-6 text-[#526984]">{focusedFollowUp.description}</p>}<div className="flex justify-end"><button onClick={() => { setForm(focusedFollowUp); setSelectedLeadId(String(focusedFollowUp.lead || "")); setFocusedFollowUp(null); }} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-semibold text-white">Edit follow-up</button></div></div></Dialog>}
       {action && (
         <Dialog
           title={activities ? "Follow-up history" : "Postpone follow-up"}

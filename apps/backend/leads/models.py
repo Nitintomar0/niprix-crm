@@ -34,6 +34,10 @@ class Lead(models.Model):
         WARM = "WARM", "Warm"
         COLD = "COLD", "Cold"
 
+    class RecoveryCategory(models.TextChoices):
+        NOT_PICK_CALL = "NOT_PICK_CALL", "Not pick call"
+        NOT_INTERESTED = "NOT_INTERESTED", "Not interested"
+
     company = models.ForeignKey("organizations.Company", on_delete=models.PROTECT, related_name="leads")
     branch = models.ForeignKey("organizations.Branch", on_delete=models.PROTECT, related_name="leads")
     assigned_to = models.ForeignKey("organizations.EmployeeProfile", null=True, blank=True, on_delete=models.PROTECT, related_name="assigned_leads")
@@ -54,6 +58,13 @@ class Lead(models.Model):
     source_details = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.NEW)
     temperature = models.CharField(max_length=10, choices=Temperature.choices, default=Temperature.WARM)
+    # Recovery is deliberately separate from the customer-facing status and
+    # temperature.  It lets a lead leave an active inbox without duplicating
+    # the customer, source, assignment, or communication history.
+    recovery_category = models.CharField(max_length=24, choices=RecoveryCategory.choices, null=True, blank=True)
+    recovery_previous_status = models.CharField(max_length=32, blank=True)
+    recovery_at = models.DateTimeField(null=True, blank=True)
+    recovery_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -64,6 +75,7 @@ class Lead(models.Model):
             models.Index(fields=["company", "assigned_to", "created_at"]),
             models.Index(fields=["company", "source", "created_at"]),
             models.Index(fields=["company", "branch", "created_at"]),
+            models.Index(fields=["company", "recovery_category", "recovery_at"], name="leads_lead_recovery_idx"),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -140,6 +152,8 @@ class LeadActivity(models.Model):
         FOLLOW_UP_RESCHEDULED = "FOLLOW_UP_RESCHEDULED", "Follow-up rescheduled"
         FOLLOW_UP_REASSIGNED = "FOLLOW_UP_REASSIGNED", "Follow-up reassigned"
         TASK_CREATED = "TASK_CREATED", "Task created"
+        RECOVERY_MARKED = "RECOVERY_MARKED", "Moved to recovery"
+        RECOVERY_RESTORED = "RECOVERY_RESTORED", "Restored from recovery"
 
     company = models.ForeignKey("organizations.Company", on_delete=models.PROTECT, related_name="lead_activities")
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="activities")

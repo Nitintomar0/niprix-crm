@@ -15,8 +15,8 @@ from rest_framework.permissions import IsAuthenticated
 from accounts.models import User
 
 from .models import EmployeeProfile
-from .serializers import EmployeeProfileSerializer, EmployeeWriteSerializer, SelfServiceProfileSerializer
-from .services import deactivate_employee, delete_inactive_employee, visible_employee_profiles
+from .serializers import AssignmentEligibilitySerializer, EmployeeProfileSerializer, EmployeeWriteSerializer, SelfServiceProfileSerializer
+from .services import deactivate_employee, delete_inactive_employee, set_assignment_eligibility, visible_employee_profiles
 
 
 class OptionalPageNumberPagination(PageNumberPagination):
@@ -93,6 +93,28 @@ class EmployeeDeactivateView(generics.GenericAPIView):
         if not profile:
             raise PermissionDenied("Employee is not available.")
         return Response(deactivate_employee(actor=request.user, profile=profile))
+
+
+class EmployeeAssignmentEligibilityView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not (request.user.is_superuser or request.user.role == User.Role.CEO):
+            raise PermissionDenied("Only CEO users can pause or resume automatic assignment.")
+        profile = visible_employee_profiles(request.user).filter(pk=pk).first()
+        if not profile:
+            raise PermissionDenied("Employee is not available.")
+        serializer = AssignmentEligibilitySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated, changed = set_assignment_eligibility(
+            actor=request.user,
+            profile=profile,
+            can_receive_leads=serializer.validated_data["can_receive_leads"],
+        )
+        return Response({
+            "employee": EmployeeProfileSerializer(updated, context={"request": request}).data,
+            "changed": changed,
+        })
 
 
 class EmployeeDeleteView(generics.GenericAPIView):

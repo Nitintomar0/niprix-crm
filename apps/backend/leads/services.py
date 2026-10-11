@@ -128,7 +128,10 @@ def validate_assignee(actor, assignee):
 
 
 def _eligible_assignees(company, branch=None):
-    queryset = EmployeeProfile.objects.select_related("user", "branch").filter(
+    # The caller is always inside an atomic lead-creation transaction. Locking
+    # candidates makes a CEO pause/resume operation serialize with selection,
+    # so a profile cannot be selected from a stale eligibility snapshot.
+    queryset = EmployeeProfile.objects.select_for_update().select_related("user", "branch").filter(
         branch__company=company, user__company=company, is_active=True, user__is_active=True,
         can_receive_leads=True, user__role="EMPLOYEE",
     )
@@ -176,6 +179,92 @@ def _record_assignment(*, lead, actor, assignee, assignment_type, reason=""):
         new_value=assignee.user.username, note=reason,
     )
     return True
+
+
+def _mark_recovery_locked(*, lead, actor, category, reason="", previous_status=None):
+    """Mark a locked lead for recovery without creating a duplicate record."""
+    if lead.recovery_category:
+        if lead.recovery_category == category:
+            return False
+        raise ValidationError({"recovery_category": "This lead is already in another recovery category."})
+    if category not in Lead.RecoveryCategory.values:
+        raise ValidationError({"recovery_category": "Unsupported recovery category."})
+    prior = previous_status if previous_status is not None else lead.status
+    lead.recovery_category = category
+    lead.recovery_previous_status = prior
+    lead.recovery_at = timezone.now()
+    lead.recovery_reason = reason.strip()
+    lead.save(update_fields=["recovery_category", "recovery_previous_status", "recovery_at", "recovery_reason", "updated_at"])
+    _activity(
+        lead=lead,
+        actor=actor,
+        activity_type=LeadActivity.Type.RECOVERY_MARKED,
+        field_name="recovery_category",
+        old_value="",
+        new_value=category,
+        note=reason.strip() or f"Moved to {lead.get_recovery_category_display()} recovery",
+        metadata={"recovery_category": category, "previous_status": prior},
+    )
+    log_action(
+        actor=actor,
+        company=lead.company,
+        action="lead.moved_to_recovery",
+        target=lead,
+        metadata={"recovery_category": category, "previous_status": prior},
+        reason=reason.strip(),
+    )
+    return True
+
+
+def _restore_recovery_locked(*, lead, actor, reason=""):
+    """Return a locked recovery lead to its captured active status."""
+    if not lead.recovery_category:
+        return False
+    category, previous_status = lead.recovery_category, lead.recovery_previous_status
+    fields = ["recovery_category", "recovery_previous_status", "recovery_at", "recovery_reason", "updated_at"]
+    lead.recovery_category = None
+    lead.recovery_previous_status = ""
+    lead.recovery_at = None
+    lead.recovery_reason = ""
+    if previous_status and previous_status != lead.status:
+        lead.status = previous_status
+        fields.append("status")
+    lead.save(update_fields=fields)
+    _activity(
+        lead=lead,
+        actor=actor,
+        activity_type=LeadActivity.Type.RECOVERY_RESTORED,
+        field_name="recovery_category",
+        old_value=category,
+        new_value="",
+        note=reason.strip() or "Restored to active leads",
+        metadata={"recovery_category": category, "restored_status": lead.status},
+    )
+    log_action(
+        actor=actor,
+        company=lead.company,
+        action="lead.restored_from_recovery",
+        target=lead,
+        metadata={"recovery_category": category, "restored_status": lead.status},
+        reason=reason.strip(),
+    )
+    return True
+
+
+def mark_lead_recovery(*, actor, lead, category, reason=""):
+    company = company_for(actor)
+    with transaction.atomic():
+        locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company)
+        _mark_recovery_locked(lead=locked, actor=actor, category=category, reason=reason)
+        return locked
+
+
+def restore_lead_from_recovery(*, actor, lead, reason=""):
+    company = company_for(actor)
+    with transaction.atomic():
+        locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company)
+        _restore_recovery_locked(lead=locked, actor=actor, reason=reason)
+        return locked
 
 
 def _source_event(*, lead, source, source_details="", external_lead_id="", external_contact_id="", external_conversation_id="", metadata=None, received_at=None):
@@ -317,8 +406,8 @@ def update_lead(*, actor, lead, data):
     data.pop("normalized_phone", None)
     assigned_to = data.pop("assigned_to", None)
     if assigned_to is not None:
-        if actor.role not in ("CEO", "MANAGER") and not actor.is_superuser:
-            raise PermissionDenied("Only managers can reassign leads.")
+        if not is_company_admin(actor):
+            raise PermissionDenied("Only CEO users can reassign leads.")
         return reassign_lead(actor=actor, lead=lead, assignee=assigned_to, reason=data.pop("assignment_note", ""))
     data.pop("branch", None)
     source = data.pop("source", None)
@@ -330,6 +419,10 @@ def update_lead(*, actor, lead, data):
         raise ValidationError({field: "This field cannot be changed." for field in unexpected})
     with transaction.atomic():
         locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company_for(actor))
+        requested_status = data.get("status")
+        if locked.recovery_category and requested_status is not None and requested_status != locked.status:
+            raise ValidationError({"status": "Restore this lead before changing its status."})
+        status_before_change = locked.status
         changed = []
         for field, value in data.items():
             old = getattr(locked, field)
@@ -342,15 +435,27 @@ def update_lead(*, actor, lead, data):
         if changed:
             locked.save(update_fields=[*changed, "updated_at"])
             log_action(actor=actor, company=locked.company, action="lead.updated", target=locked, metadata={"fields": changed})
+        # PATCH and the dedicated /status/ endpoint both use this service, so
+        # Not Interested is categorised consistently regardless of entrypoint.
+        if requested_status == Lead.Status.NOT_INTERESTED and not locked.recovery_category:
+            _mark_recovery_locked(
+                lead=locked,
+                actor=actor,
+                category=Lead.RecoveryCategory.NOT_INTERESTED,
+                previous_status=status_before_change,
+            )
         return locked
 
 
 def reassign_lead(*, actor, lead, assignee, reason=""):
-    if actor.role not in ("CEO", "MANAGER") and not actor.is_superuser:
-        raise PermissionDenied("Only managers can reassign leads.")
+    if not is_company_admin(actor):
+        raise PermissionDenied("Only CEO users can reassign leads.")
     assignee = validate_assignee(actor, assignee)
     with transaction.atomic():
         locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company_for(actor))
+        # Recovery reassignment means the lead deliberately resumes in the new
+        # owner's active inbox; it never remains in both workspaces.
+        _restore_recovery_locked(lead=locked, actor=actor, reason=reason or "Restored while reassigning")
         changed = _record_assignment(lead=locked, actor=actor, assignee=assignee, assignment_type=LeadAssignment.Type.REASSIGNED, reason=reason)
         if changed:
             # Follow-ups are work items attached to this Lead, not copies of it.
@@ -388,6 +493,11 @@ def move_lead_to_follow_up(*, actor, lead, data):
             pk=lead.pk,
             company_id=company.id,
         )
+
+        # A recovery lead leaves recovery before it enters the canonical
+        # Follow-up workflow.  The follow-up status written below becomes the
+        # sole active-work state.
+        _restore_recovery_locked(lead=locked, actor=actor, reason="Moved to follow-up workflow")
 
         if not locked.assigned_to_id:
             raise ValidationError({
@@ -499,10 +609,29 @@ def add_note(*, actor, lead, note):
 
 
 def delete_lead(*, actor, lead):
-    if actor.role not in ("CEO", "MANAGER") and not actor.is_superuser:
-        raise PermissionDenied("Only managers can delete leads.")
+    if not is_company_admin(actor):
+        raise PermissionDenied("Only CEO users can delete leads.")
     with transaction.atomic():
         locked = Lead.objects.select_for_update().get(pk=lead.pk, company=company_for(actor))
+        protected = []
+        if LeadActivity.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("activity timeline")
+        if LeadSource.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("source attribution")
+        if LeadAssignment.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("assignment history")
+        # These relations use SET_NULL today.  Do not quietly sever business
+        # records from their customer just to satisfy a deletion request.
+        from workspace.models import FollowUp, Task
+        from integrations.models import IntegrationEvent
+        if FollowUp.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("follow-up records")
+        if Task.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("task records")
+        if IntegrationEvent.objects.filter(company=locked.company, lead=locked).exists():
+            protected.append("integration events")
+        if protected:
+            raise ValidationError({"detail": f"This lead cannot be permanently deleted because it has protected {'; '.join(protected)}. Preserve the audit history or use a retention-approved process."})
         # AuditLog stores only model label + identifier, so this remains useful after
         # hard deletion without retaining lead contact data.
         log_action(actor=actor, company=locked.company, action="lead.deleted", target=locked)

@@ -63,11 +63,13 @@ class LeadSerializer(serializers.ModelSerializer):
             "name", "phone", "alternate_phone", "email", "property_type", "preferred_location",
             "budget_minimum", "budget_maximum", "bhk", "purpose", "requirement_notes", "source",
             "source_details", "status", "temperature", "created_at", "updated_at",
+            "recovery_category", "recovery_previous_status", "recovery_at", "recovery_reason",
             "source_metadata", "external_lead_id", "external_contact_id", "external_conversation_id",
             "received_at", "assignment_note",
         )
         read_only_fields = (
             "id", "company", "created_by", "assigned_to_detail", "created_by_name", "created_at", "updated_at",
+            "recovery_category", "recovery_previous_status", "recovery_at", "recovery_reason",
         )
         extra_kwargs = {"phone": {"required": True}}
 
@@ -89,6 +91,21 @@ class LeadSerializer(serializers.ModelSerializer):
         return update_lead(actor=self.context["request"].user, lead=instance, data=validated_data)
 
 
+class LeadRecoverySerializer(LeadSerializer):
+    """Recovery rows retain the normal Lead payload plus their latest context."""
+
+    last_activity = serializers.SerializerMethodField()
+
+    class Meta(LeadSerializer.Meta):
+        fields = LeadSerializer.Meta.fields + ("last_activity",)
+
+    def get_last_activity(self, lead):
+        activity = next(iter(getattr(lead, "recovery_activities", [])), None)
+        if not activity:
+            return None
+        return LeadActivitySerializer(activity).data
+
+
 class LeadStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=Lead.Status.choices)
     note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
@@ -101,6 +118,10 @@ class LeadTemperatureSerializer(serializers.Serializer):
 
 class LeadReassignSerializer(serializers.Serializer):
     assigned_to = serializers.PrimaryKeyRelatedField(queryset=EmployeeProfile.objects.all())
+    note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
+class LeadRecoveryActionSerializer(serializers.Serializer):
     note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
 
 

@@ -111,6 +111,14 @@ class RawDataAPITests(APITestCase):
         inactive = self.post_distribution({"raw_lead_ids": [raw.pk], "employee_ids": [self.employee.pk], "mode": "SPECIFIC"})
         self.assertEqual(inactive.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(RawLead.objects.filter(pk=raw.pk).exists())
+
+    def test_paused_employee_is_not_eligible_for_raw_data_distribution(self):
+        raw = self.raw("9876543699")
+        self.employee.can_receive_leads = False
+        self.employee.save(update_fields=["can_receive_leads"])
+        response = self.post_distribution({"raw_lead_ids": [raw.pk], "employee_ids": [self.employee.pk], "mode": "SPECIFIC"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(RawLead.objects.filter(pk=raw.pk).exists())
         self.employee.is_active = True
         self.employee.save(update_fields=["is_active"])
         Lead.objects.create(company=self.company, branch=self.branch, phone=raw.phone, normalized_phone=raw.normalized_phone)

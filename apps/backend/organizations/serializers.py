@@ -83,6 +83,8 @@ class EmployeeWriteSerializer(serializers.ModelSerializer):
             # Use a transient profile only for company/cycle validation on create.
             subject = self.instance or EmployeeProfile(branch=branch)
             validate_reporting_manager(subject, manager)
+        if self.instance and "can_receive_leads" in attrs and attrs["can_receive_leads"] != self.instance.can_receive_leads:
+            raise serializers.ValidationError({"can_receive_leads": "Use the pause or resume assignment action."})
         return attrs
 
     def create(self, validated_data):
@@ -109,6 +111,10 @@ class EmployeeWriteSerializer(serializers.ModelSerializer):
         instance.full_clean()
         instance.save()
         return instance
+
+
+class AssignmentEligibilitySerializer(serializers.Serializer):
+    can_receive_leads = serializers.BooleanField()
 
 
 class SelfServiceProfileSerializer(serializers.ModelSerializer):
