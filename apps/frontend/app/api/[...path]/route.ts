@@ -32,7 +32,7 @@ async function proxy(request: NextRequest) {
   }
 
   const responseHeaders = new Headers();
-  ["content-type", "cache-control", "www-authenticate"].forEach((name) => {
+  ["content-type", "cache-control", "content-disposition", "www-authenticate"].forEach((name) => {
     const value = response.headers.get(name);
     if (value) responseHeaders.set(name, value);
   });

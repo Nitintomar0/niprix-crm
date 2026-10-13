@@ -5,7 +5,7 @@ import {
   useCallback,
   useEffect,
   useState,
-  type ReactNode,
+  type ReactNode, useRef
 } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -236,10 +236,16 @@ export function WorkDashboard({
   const [busy, setBusy] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [focusedFollowUp, setFocusedFollowUp] = useState<FollowUp | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    const query = new URLSearchParams({ page: String(page), page_size: "20" });
+
+const hasRows = useRef(false);
+const load = useCallback(async () => {
+  setError("");
+  const query = new URLSearchParams({ page: String(page), page_size: "20" });
+
+  if (!hasRows.current) {
+  setLoading(true);
+}
+
     if (search) query.set("search", search);
     if (status) query.set("status", status);
     if (priority) query.set("priority", priority);
@@ -248,6 +254,17 @@ export function WorkDashboard({
     if (isFollowUp && source) query.set("source", source);
     if (isFollowUp && location) query.set("location", location);
     if (isFollowUp && scheduledDate) query.set("date", scheduledDate);
+
+    if (isFollowUp) {
+      const cachedRows = api.peekFollowUps(query.toString());
+      if (cachedRows) {
+        setRows(cachedRows.results);
+        setTotal(cachedRows.count);
+        hasRows.current = cachedRows.results.length > 0;
+        setLoading(false);
+      }
+    }
+
     try {
       const [nextSummary, listed, people, leads] = await Promise.all([
         api.workspaceSummary(),
@@ -259,6 +276,7 @@ export function WorkDashboard({
       ]);
       setSummary(nextSummary);
       setRows(listed.results);
+      hasRows.current = listed.results.length > 0;
       setTotal(listed.count);
       setEmployees(Array.isArray(people) ? people : people.results);
       setAvailableLeads(leads?.results || []);

@@ -1,32 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { AppShell } from "@/components/app-shell";
-import { AttendanceDashboard } from "@/components/attendance-dashboard";
-import { LoginScreen } from "@/components/login-screen";
+import dynamic from "next/dynamic";
 import { Overview } from "@/components/overview";
-import { ReminderPreferences } from "@/components/reminder-preferences";
-import { WorkDashboard } from "@/components/workspace-dashboard";
-import { LeadsDashboard } from "@/components/leads-dashboard";
-import { LeadRecoveryDashboard } from "@/components/lead-recovery-dashboard";
-import { IntegrationsDashboard } from "@/components/integrations-dashboard";
-import { InventoryDashboard } from "@/components/inventory-dashboard";
-import { RawDataDashboard } from "@/components/raw-data-dashboard";
-import { Employee360 } from "@/components/employee-360";
-import { EmployeeDirectory } from "@/components/employee-directory";
-import { HRDashboardPage } from "@/components/hr-dashboard";
-import { DocumentsPage, HolidaysPage, LeaveBalancesPage, LeaveRequestsPage, LeaveTypesPage } from "@/components/hr-management";
-import { api, clearTokens, hasStoredSession, saveTokens } from "@/lib/api";
-import type { User } from "@/lib/types";
-import NiprixLoader from "@/components/niprix-loader";
+import { useNiprixAuth } from "@/components/niprix-auth-provider";
+
+function PageSectionLoader() {
+  return <div aria-label="Loading section" className="space-y-4"><div className="shimmer h-12 rounded-2xl" /><div className="shimmer h-64 rounded-2xl" /></div>;
+}
+
+const AttendanceDashboard = dynamic(() => import("@/components/attendance-dashboard").then((module) => module.AttendanceDashboard), { loading: PageSectionLoader });
+const ReminderPreferences = dynamic(() => import("@/components/reminder-preferences").then((module) => module.ReminderPreferences), { loading: PageSectionLoader });
+const WorkDashboard = dynamic(() => import("@/components/workspace-dashboard").then((module) => module.WorkDashboard), { loading: PageSectionLoader });
+const LeadsDashboard = dynamic(() => import("@/components/leads-dashboard").then((module) => module.LeadsDashboard), { loading: PageSectionLoader });
+const LeadRecoveryDashboard = dynamic(() => import("@/components/lead-recovery-dashboard").then((module) => module.LeadRecoveryDashboard), { loading: PageSectionLoader });
+const IntegrationsDashboard = dynamic(() => import("@/components/integrations-dashboard").then((module) => module.IntegrationsDashboard), { loading: PageSectionLoader });
+const InventoryDashboard = dynamic(() => import("@/components/inventory-dashboard").then((module) => module.InventoryDashboard), { loading: PageSectionLoader });
+const RawDataDashboard = dynamic(() => import("@/components/raw-data-dashboard").then((module) => module.RawDataDashboard), { loading: PageSectionLoader });
+const Employee360 = dynamic(() => import("@/components/employee-360").then((module) => module.Employee360), { loading: PageSectionLoader });
+const EmployeeDirectory = dynamic(() => import("@/components/employee-directory").then((module) => module.EmployeeDirectory), { loading: PageSectionLoader });
+const HRDashboardPage = dynamic(() => import("@/components/hr-dashboard").then((module) => module.HRDashboardPage), { loading: PageSectionLoader });
+const DocumentsPage = dynamic(() => import("@/components/hr-management").then((module) => module.DocumentsPage), { loading: PageSectionLoader });
+const HolidaysPage = dynamic(() => import("@/components/hr-management").then((module) => module.HolidaysPage), { loading: PageSectionLoader });
+const LeaveBalancesPage = dynamic(() => import("@/components/hr-management").then((module) => module.LeaveBalancesPage), { loading: PageSectionLoader });
+const LeaveRequestsPage = dynamic(() => import("@/components/hr-management").then((module) => module.LeaveRequestsPage), { loading: PageSectionLoader });
+const LeaveTypesPage = dynamic(() => import("@/components/hr-management").then((module) => module.LeaveTypesPage), { loading: PageSectionLoader });
 
 export function NiprixApp({ page, leadId, employeeId }: { page: "overview" | "attendance" | "followups" | "tasks" | "reminders" | "leads" | "leadRecovery" | "rawData" | "integrations" | "inventory" | "employees" | "employee" | "hr" | "leaveRequests" | "leaveTypes" | "leaveBalances" | "holidays" | "documents"; leadId?: number; employeeId?: number }) {
-  const [user, setUser] = useState<User | null>(null); const [checking, setChecking] = useState(true); const [error, setError] = useState("");
-  const restore = useCallback(async () => { if (!hasStoredSession()) { setChecking(false); return; } try { setUser(await api.me()); } catch (caught) { clearTokens(); setError(caught instanceof Error ? `Your saved session could not be restored. ${caught.message}` : "Your saved session could not be restored. Please sign in again."); } finally { setChecking(false); } }, []);
-  useEffect(() => { const timer = window.setTimeout(() => { void restore(); }, 0); const unauthorized = () => { clearTokens(); setUser(null); setError("Your session has ended. Please sign in again."); }; window.addEventListener("niprix:unauthorized", unauthorized); return () => { window.clearTimeout(timer); window.removeEventListener("niprix:unauthorized", unauthorized); }; }, [restore]);
-  async function login(username: string, password: string) { setError(""); try { saveTokens(await api.login(username, password)); setUser(await api.me()); } catch (caught) { clearTokens(); setError(caught instanceof Error ? caught.message : "Unable to sign in. Please try again."); throw caught; } }
-  async function logout() { try { await api.logout(); setError(""); } catch (caught) { setError(caught instanceof Error ? `You have been signed out locally. ${caught.message}` : "You have been signed out locally, but the server could not be reached."); } finally { setUser(null); } }
-  if (checking) return <NiprixLoader />;
-  if (!user) return <LoginScreen onSubmit={login} error={error} />;
-  return <AppShell user={user} onLogout={() => void logout()}>{page === "hr" ? <HRDashboardPage role={user.role} /> : page === "leaveRequests" ? <LeaveRequestsPage role={user.role} /> : page === "leaveTypes" ? <LeaveTypesPage role={user.role} /> : page === "leaveBalances" ? <LeaveBalancesPage /> : page === "holidays" ? <HolidaysPage role={user.role} /> : page === "documents" ? <DocumentsPage role={user.role} /> : page === "employees" ? <EmployeeDirectory role={user.role} /> : page === "employee" && employeeId ? <Employee360 employeeId={employeeId} role={user.role} /> : page === "attendance" ? <AttendanceDashboard role={user.role} /> : page === "leads" ? <LeadsDashboard role={user.role} leadId={leadId} /> : page === "leadRecovery" ? <LeadRecoveryDashboard role={user.role} /> : page === "rawData" ? <RawDataDashboard role={user.role} /> : page === "integrations" ? <IntegrationsDashboard /> : page === "inventory" ? <InventoryDashboard role={user.role} /> : page === "followups" ? <WorkDashboard kind="followups" role={user.role} /> : page === "tasks" ? <WorkDashboard kind="tasks" role={user.role} /> : page === "reminders" ? <ReminderPreferences /> : <Overview user={user} />}</AppShell>;
+  const { user } = useNiprixAuth();
+
+  return page === "hr" ? <HRDashboardPage role={user.role} /> : page === "leaveRequests" ? <LeaveRequestsPage role={user.role} /> : page === "leaveTypes" ? <LeaveTypesPage role={user.role} /> : page === "leaveBalances" ? <LeaveBalancesPage /> : page === "holidays" ? <HolidaysPage role={user.role} /> : page === "documents" ? <DocumentsPage role={user.role} /> : page === "employees" ? <EmployeeDirectory role={user.role} /> : page === "employee" && employeeId ? <Employee360 employeeId={employeeId} role={user.role} /> : page === "attendance" ? <AttendanceDashboard role={user.role} /> : page === "leads" ? <LeadsDashboard role={user.role} leadId={leadId} /> : page === "leadRecovery" ? <LeadRecoveryDashboard role={user.role} /> : page === "rawData" ? <RawDataDashboard role={user.role} /> : page === "integrations" ? <IntegrationsDashboard /> : page === "inventory" ? <InventoryDashboard role={user.role} /> : page === "followups" ? <WorkDashboard kind="followups" role={user.role} /> : page === "tasks" ? <WorkDashboard kind="tasks" role={user.role} /> : page === "reminders" ? <ReminderPreferences /> : <Overview user={user} />;
 }

@@ -100,3 +100,61 @@ class InstagramWebhookView(WebhookView):
 
 class WebsiteIntakeView(WebhookView):
     provider = "WEBSITE"
+
+
+class MagicbricksWebhookView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        import hmac
+        from django.conf import settings
+
+        expected_key = settings.NIPRIX_MAGICBRICKS_API_KEY
+        provided_key = request.headers.get("X-API-Key", "")
+
+        if not expected_key or not provided_key:
+            return Response(
+                {"detail": "Invalid API key."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not hmac.compare_digest(expected_key, provided_key):
+            return Response(
+                {"detail": "Invalid API key."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            raw_body = request.body
+            payload = json.loads(raw_body.decode("utf-8"))
+            result = process_webhook(
+                provider="MAGICBRICKS",
+                raw_body=raw_body,
+                payload=payload,
+            )
+        except json.JSONDecodeError:
+            return Response(
+                {"detail": "Webhook body must be valid JSON."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except InvalidWebhook as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except ValidationError as error:
+            return Response(
+                error.detail,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            return Response(
+                {"detail": "Webhook processing failed."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        return Response(
+            {"status": result.event.status, "duplicate": result.duplicate},
+            status=status.HTTP_200_OK,
+        )

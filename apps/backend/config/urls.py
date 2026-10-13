@@ -15,17 +15,19 @@ from leads.views import (
     LeadListCreateView, LeadMarkNotPickedView, LeadMoveToFollowUpView, LeadRecoveryListView,
     LeadRecoverySummaryView, LeadRestoreView, LeadSourceListView, LeadStatusView, LeadSummaryView, LeadTemperatureView,
 )
+
 from integrations.views import (
     FacebookWebhookView, InstagramWebhookView, IntegrationConfigurationDetailView,
     IntegrationConfigurationListCreateView, IntegrationEventListView, WebsiteIntakeView,
-    WhatsAppWebhookView,
+    WhatsAppWebhookView, MagicbricksWebhookView,
 )
+
 from organizations.views import EmployeeOverviewView, EmployeePerformanceView, EmployeeAttendanceView, EmployeeActivityView, EmployeeLeadsView, EmployeeWorkView
 from hrms.views import (
     EmployeeDocumentDetailView, EmployeeDocumentDownloadView, EmployeeDocumentListCreateView, HolidayDetailView, HolidayListCreateView,
     EmployeeDocumentOverviewListView, HRDashboardView, LeaveBalanceDetailView, LeaveBalanceListView, LeaveRequestActionView, LeaveRequestListCreateView, LeaveTypeDetailView, LeaveTypeListView,
 )
-from inventory.views import InventoryBulkCreateView, InventoryDetailView, InventoryListCreateView, InventorySummaryView
+from inventory.views import InventoryBulkCreateView, InventoryDetailView, InventoryListCreateView, InventoryPDFExportView, InventorySummaryView
 from raw_data.views import (
     RawDataDistributionPreviewView, RawDataDistributionView, RawDataEligibleEmployeesView,
     RawDataPreviewView, RawDataSavePreviewView, RawDataSummaryView, RawLeadDetailView, RawLeadListCreateView,
@@ -137,6 +139,7 @@ urlpatterns = [
     path("api/raw-data/<int:pk>/", RawLeadDetailView.as_view(), name="raw-lead-detail"),
     path("api/inventory/", InventoryListCreateView.as_view(), name="inventory-list"),
     path("api/inventory/summary/", InventorySummaryView.as_view(), name="inventory-summary"),
+    path("api/inventory/export/pdf/", InventoryPDFExportView.as_view(), name="inventory-pdf-export"),
     path("api/inventory/bulk/", InventoryBulkCreateView.as_view(), name="inventory-bulk-create"),
     path("api/inventory/<int:pk>/", InventoryDetailView.as_view(), name="inventory-detail"),
     path("api/leads/summary/", LeadSummaryView.as_view(), name="lead-summary"),
@@ -156,6 +159,7 @@ urlpatterns = [
     path("api/integrations/webhooks/facebook/", FacebookWebhookView.as_view(), name="webhook-facebook"),
     path("api/integrations/webhooks/instagram/", InstagramWebhookView.as_view(), name="webhook-instagram"),
     path("api/integrations/website/", WebsiteIntakeView.as_view(), name="website-intake"),
+    path("api/integrations/webhooks/magicbricks/", MagicbricksWebhookView.as_view(), name="webhook-magicbricks"),
     path("api/hrms/leave-types/", LeaveTypeListView.as_view(), name="leave-type-list"),
     path("api/hrms/leave-types/<int:pk>/", LeaveTypeDetailView.as_view(), name="leave-type-detail"),
     path("api/hrms/leave-balances/", LeaveBalanceListView.as_view(), name="leave-balance-list"),

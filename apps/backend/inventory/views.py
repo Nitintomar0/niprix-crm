@@ -1,5 +1,6 @@
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -7,10 +8,12 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.renderers import BaseRenderer
 
 from core.audit import log_action
 from core.notifications import notify_company_roles
 from .models import InventoryItem
+from .pdf import build_inventory_pdf
 from .serializers import InventoryBulkCreateSerializer, InventoryItemSerializer
 
 
@@ -131,7 +134,58 @@ class InventorySummaryView(APIView):
 
     def get(self, request):
         queryset = inventory_queryset(request.user)
-        result = {"total": queryset.count(), "available": queryset.filter(status="AVAILABLE").count(), "hold": queryset.filter(status="HOLD").count(), "booked": queryset.filter(status="BOOKED").count(), "sold": queryset.filter(status="SOLD").count()}
+        aggregates = {
+            "total": Count("id"),
+            "available": Count("id", filter=Q(status=InventoryItem.Status.AVAILABLE)),
+            "hold": Count("id", filter=Q(status=InventoryItem.Status.HOLD)),
+            "booked": Count("id", filter=Q(status=InventoryItem.Status.BOOKED)),
+            "sold": Count("id", filter=Q(status=InventoryItem.Status.SOLD)),
+        }
         if is_ceo(request.user):
-            result["landing_total"] = str(queryset.aggregate(total=Sum("landing"))["total"] or 0)
+            aggregates["landing_total"] = Sum("landing")
+        counts = queryset.aggregate(**aggregates)
+        result = {key: counts[key] for key in ("total", "available", "hold", "booked", "sold")}
+        if is_ceo(request.user):
+            result["landing_total"] = str(counts["landing_total"] or 0)
         return Response(result)
+
+
+
+class PDFRenderer(BaseRenderer):
+    media_type = "application/pdf"
+    format = "pdf"
+    charset = None
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
+
+class InventoryPDFExportView(APIView):
+    """CEO-only complete-inventory export. Pagination and UI filters never apply."""
+
+    permission_classes = [IsAuthenticated]
+    renderer_classes = [PDFRenderer]
+
+    def get(self, request):
+        if not is_ceo(request.user):
+            raise PermissionDenied("Only CEOs can export the complete inventory report.")
+
+        # Use the tenant-scoped base queryset directly: this is intentionally
+        # not the paginated list view and therefore cannot omit later pages.
+        records = inventory_queryset(request.user).values_list(
+            "project",
+            "unit_number",
+            "property_type",
+            "size_sqft",
+            "floor",
+            "basic_price",
+            "status",
+            "landing",
+            "booking_date",
+        )
+        pdf = build_inventory_pdf(records)
+        timestamp = timezone.localtime(timezone.now()).strftime("%Y%m%d-%H%M%S")
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="niprix-inventory-{timestamp}.pdf"'
+        response["Cache-Control"] = "no-store, private"
+        return response

@@ -27,6 +27,8 @@ function titleFor(pathname: string | null) {
   return "Dashboard";
 }
 
+
+
 export function AppShell({ user, children, onLogout }: { user: User; children: ReactNode; onLogout: () => void }) {
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);

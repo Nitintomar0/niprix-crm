@@ -154,6 +154,39 @@ function Input({
   );
 }
 
+
+
+type LeadsListSnapshot = {
+  role: Role;
+  page: number;
+  search: string;
+  status: string;
+  temperature: string;
+  source: string;
+  assignedTo: string;
+  location: string;
+  dateFilter: string;
+  specificDate: string;
+  dateFrom: string;
+  dateTo: string;
+  scrollY: number;
+  savedAt: number;
+};
+
+const LEADS_LIST_SNAPSHOT_KEY = "niprix-leads-list-snapshot-v1";
+
+function saveLeadsListSnapshot(snapshot: LeadsListSnapshot) {
+  try {
+    window.sessionStorage.setItem(
+      LEADS_LIST_SNAPSHOT_KEY,
+      JSON.stringify(snapshot),
+    );
+  } catch {
+    // Ignore unavailable session storage.
+  }
+}
+
+
 export function LeadsDashboard({
   role,
   leadId,
@@ -180,18 +213,72 @@ export function LeadsDashboard({
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [pendingScrollRestore, setPendingScrollRestore] = useState<number | null>(null);
   const latestLoad = useRef(0);
-  useEffect(() => {
-    if (leadId) return;
-    const params = new URLSearchParams(window.location.search);
-    const requestedSearch = params.get("search");
-    if (requestedSearch) setSearch(requestedSearch);
-    if (params.get("create") === "1") setCreating(true);
-  }, [leadId]);
+
+
+useEffect(() => {
+  if (leadId || loading || pendingScrollRestore === null) return;
+
+  const frame = window.requestAnimationFrame(() => {
+    window.scrollTo({ top: pendingScrollRestore, behavior: "instant" });
+    setPendingScrollRestore(null);
+  });
+
+  return () => window.cancelAnimationFrame(frame);
+}, [leadId, loading, leads, pendingScrollRestore]);
+
+
+
+
+
+
+useEffect(() => {
+  if (leadId) return;
+
+  const params = new URLSearchParams(window.location.search);
+  const requestedSearch = params.get("search");
+
+  if (params.get("create") === "1") setCreating(true);
+
+  try {
+    const raw = window.sessionStorage.getItem(LEADS_LIST_SNAPSHOT_KEY);
+
+    if (raw) {
+      const snapshot = JSON.parse(raw) as LeadsListSnapshot;
+      const isRecent = Date.now() - snapshot.savedAt < 10 * 60 * 1000;
+
+      if (snapshot.role === role && isRecent) {
+        window.sessionStorage.removeItem(LEADS_LIST_SNAPSHOT_KEY);
+
+        setPage(snapshot.page);
+        setSearch(requestedSearch ?? snapshot.search);
+        setStatus(snapshot.status);
+        setTemperature(snapshot.temperature);
+        setSource(snapshot.source);
+        setAssignedTo(snapshot.assignedTo);
+        setLocation(snapshot.location);
+        setDateFilter(snapshot.dateFilter);
+        setSpecificDate(snapshot.specificDate);
+        setDateFrom(snapshot.dateFrom);
+        setDateTo(snapshot.dateTo);
+
+        setPendingScrollRestore(snapshot.scrollY);
+        return;
+      }
+
+      window.sessionStorage.removeItem(LEADS_LIST_SNAPSHOT_KEY);
+    }
+  } catch {
+    window.sessionStorage.removeItem(LEADS_LIST_SNAPSHOT_KEY);
+  }
+
+  if (requestedSearch) setSearch(requestedSearch);
+}, [leadId, role]);
+
   const load = useCallback(async () => {
     if (leadId) return;
     const requestId = ++latestLoad.current;
-    setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({
@@ -216,6 +303,17 @@ export function LeadsDashboard({
       if (specificDate) { query.set("date_from", specificDate); query.set("date_to", specificDate); }
       if (dateFrom) query.set("date_from", dateFrom);
       if (dateTo) query.set("date_to", dateTo);
+
+const cached = api.peekLeads(query.toString());
+
+if (cached) {
+  setLeads(cached.results);
+  setTotal(cached.count);
+  setLoading(false);
+} else {
+  setLoading(true);
+}
+
       const [records, metrics, people] = await Promise.all([
         api.leads(query.toString()),
         api.leadSummary(),
@@ -243,6 +341,41 @@ export function LeadsDashboard({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+
+const saveCurrentLeadsListState = useCallback(() => {
+  saveLeadsListSnapshot({
+    role,
+    page,
+    search,
+    status,
+    temperature,
+    source,
+    assignedTo,
+    location,
+    dateFilter,
+    specificDate,
+    dateFrom,
+    dateTo,
+    scrollY: window.scrollY,
+    savedAt: Date.now(),
+  });
+}, [
+  role,
+  page,
+  search,
+  status,
+  temperature,
+  source,
+  assignedTo,
+  location,
+  dateFilter,
+  specificDate,
+  dateFrom,
+  dateTo,
+]);
+
+
   if (leadId) return <LeadDetail id={leadId} role={role} />;
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -405,8 +538,23 @@ export function LeadsDashboard({
         {loading && <div className="mt-5 grid gap-3 md:hidden">{[0, 1, 2].map((item) => <div key={item} className="shimmer h-36 rounded-2xl" />)}</div>}
         <div className="mt-5 grid gap-3 md:hidden">
           {!loading && leads.map((lead, index) => <article key={lead.id} className="mobile-card-enter rounded-2xl border border-[#e2eaf3] bg-white p-4" style={{ animationDelay: `${index * 25}ms` }}>
-            <Link href={`/leads/${lead.id}`} className="block focus-ring rounded-lg"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-[16px] font-bold text-[#203756]">{empty(lead.name)}</h2><p className="mt-1 truncate text-[13px] text-[#60708a]">{lead.phone || "No phone available"}</p></div><Badge value={lead.temperature} /></div><p className="mt-3 truncate text-sm font-medium text-[#405773]">{empty(lead.property_type)} <span className="text-[#9aa7b8]">·</span> {empty(lead.preferred_location)}</p><div className="mt-3 flex flex-wrap gap-1.5"><Badge value={lead.status} /><Badge value={lead.source} /></div>{role !== "EMPLOYEE" && <p className="mt-3 truncate text-xs text-[#75869b]">Owner: {lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username || "Unassigned"}</p>}</Link>
-            <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[#edf1f5] pt-3">{hasUsablePhone(lead.phone) ? <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#edf8f4] text-xs font-bold text-[#168460]"><Icon name="phone" className="h-3.5 w-3.5" />Call</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">No number</span>}{hasUsablePhone(lead.phone) ? <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#e9f8ef] text-xs font-bold text-[#168460]"><Icon name="message" className="h-3.5 w-3.5" />WhatsApp</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">WhatsApp</span>}<Link href={`/leads/${lead.id}`} className="focus-ring inline-flex min-h-10 items-center justify-center rounded-xl bg-[#eaf4ff] text-xs font-bold text-[#0869d8]">Open</Link></div>
+            <Link
+  href={`/leads/${lead.id}`}
+
+onClick={() => {
+  api.primeLeadFromList(lead);
+  saveCurrentLeadsListState();
+}}
+
+  className="block focus-ring rounded-lg"
+><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-[16px] font-bold text-[#203756]">{empty(lead.name)}</h2><p className="mt-1 truncate text-[13px] text-[#60708a]">{lead.phone || "No phone available"}</p></div><Badge value={lead.temperature} /></div><p className="mt-3 truncate text-sm font-medium text-[#405773]">{empty(lead.property_type)} <span className="text-[#9aa7b8]">·</span> {empty(lead.preferred_location)}</p><div className="mt-3 flex flex-wrap gap-1.5"><Badge value={lead.status} /><Badge value={lead.source} /></div>{role !== "EMPLOYEE" && <p className="mt-3 truncate text-xs text-[#75869b]">Owner: {lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username || "Unassigned"}</p>}</Link>
+            <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[#edf1f5] pt-3">{hasUsablePhone(lead.phone) ? <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#edf8f4] text-xs font-bold text-[#168460]"><Icon name="phone" className="h-3.5 w-3.5" />Call</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">No number</span>}{hasUsablePhone(lead.phone) ? <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-[#e9f8ef] text-xs font-bold text-[#168460]"><Icon name="message" className="h-3.5 w-3.5" />WhatsApp</a> : <span className="inline-flex min-h-10 items-center justify-center rounded-xl bg-[#f4f6f8] text-xs font-medium text-[#91a0b1]">WhatsApp</span>}<Link
+  href={`/leads/${lead.id}`}
+  onClick={saveCurrentLeadsListState}
+  className="focus-ring inline-flex min-h-10 items-center justify-center rounded-xl bg-[#eaf4ff] text-xs font-bold text-[#0869d8]"
+>
+  Open
+</Link></div>
           </article>)}
         </div>
         <div className="mt-5 hidden overflow-x-auto md:block">
@@ -456,12 +604,20 @@ export function LeadsDashboard({
                   <td className="py-4 text-right">
                     {hasUsablePhone(lead.phone) && <a href={`tel:${contactNumber(lead.phone)}`} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">Call</a>}
                     {hasUsablePhone(lead.phone) && <a target="_blank" rel="noreferrer" href={whatsappUrl(lead.phone, lead.assigned_to_detail?.display_name || lead.assigned_to_detail?.username)} className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#168460]">WhatsApp</a>}
-                    <Link
-                      href={`/leads/${lead.id}`}
-                      className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#0869d8]"
-                    >
-                      Open
-                    </Link>
+
+<Link
+  href={`/leads/${lead.id}`}
+
+onClick={() => {
+  api.primeLeadFromList(lead);
+  saveCurrentLeadsListState();
+}}
+
+  className="focus-ring rounded-lg px-2 py-1 text-xs font-semibold text-[#0869d8]"
+>
+  Open
+</Link>
+
                   </td>
                 </tr>
               ))}
@@ -534,7 +690,9 @@ export function LeadsDashboard({
 }
 
 function LeadDetail({ id, role }: { id: number; role: Role }) {
-  const [lead, setLead] = useState<Lead | null>(null);
+
+const [lead, setLead] = useState<Lead | null>(() => api.peekLead(id) ?? null);
+
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [sources, setSources] = useState<LeadSource[]>([]);
   const [assignments, setAssignments] = useState<LeadAssignment[]>([]);
@@ -551,39 +709,52 @@ function LeadDetail({ id, role }: { id: number; role: Role }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
   const load = useCallback(async () => {
     setError("");
+
     try {
-      const [
-        record,
-        activityData,
-        sourceData,
-        assignmentData,
-        followData,
-        taskData,
-        people,
-      ] = await Promise.all([
-        api.lead(id),
-        api.leadActivities(id),
-        api.leadSources(id),
-        api.leadAssignments(id),
-        api.followUps(`lead=${id}&page=1&page_size=100`),
-        api.tasks(`lead=${id}&page=1&page_size=100`),
-        api.employees(),
-      ]);
+      const record = await api.lead(id);
       setLead(record);
-      setActivities(activityData.results);
-      setSources(sourceData.results);
-      setAssignments(assignmentData.results);
-      setFollowUps(followData.results);
-      setTasks(taskData.results);
-      setEmployees(resultRows(people));
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not load this lead.",
       );
+      return;
+    }
+
+    const relatedResults = await Promise.allSettled([
+      api.leadActivities(id),
+      api.leadSources(id),
+      api.leadAssignments(id),
+      api.followUps(`lead=${id}&page=1&page_size=100`),
+      api.tasks(`lead=${id}&page=1&page_size=100`),
+      api.employees(),
+    ]);
+
+    const [activityData, sourceData, assignmentData, followData, taskData, people] =
+      relatedResults;
+
+    if (activityData.status === "fulfilled") {
+      setActivities(activityData.value.results);
+    }
+    if (sourceData.status === "fulfilled") {
+      setSources(sourceData.value.results);
+    }
+    if (assignmentData.status === "fulfilled") {
+      setAssignments(assignmentData.value.results);
+    }
+    if (followData.status === "fulfilled") {
+      setFollowUps(followData.value.results);
+    }
+    if (taskData.status === "fulfilled") {
+      setTasks(taskData.value.results);
+    }
+    if (people.status === "fulfilled") {
+      setEmployees(resultRows(people.value));
     }
   }, [id]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void load();

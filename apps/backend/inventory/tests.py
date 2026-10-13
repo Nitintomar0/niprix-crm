@@ -1,6 +1,7 @@
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from unittest.mock import patch
 
 from accounts.models import User
 from organizations.models import Branch, Company, Department, EmployeeProfile
@@ -59,3 +60,68 @@ class InventoryAPITests(APITestCase):
         self.assertEqual(self.client.delete(reverse("inventory-detail", args=[item["id"]])).status_code, status.HTTP_204_NO_CONTENT)
         self.assertTrue(InventoryItem.objects.get(pk=item["id"]).archived_at)
         self.assertEqual(self.client.get(reverse("inventory-list")).data["count"], 0)
+
+    def create_export_items(self, count=60):
+        return InventoryItem.objects.bulk_create([
+            InventoryItem(
+                company=self.company,
+                created_by=self.ceo,
+                project=f"Export Project {index // 10}",
+                unit_number=f"Unit {index:03d}",
+                property_type="Apartment",
+                size_sqft="1000.50",
+                floor=f"Floor {index % 12}",
+                basic_price="5000000.00",
+                landing="4500000.00",
+                status=InventoryItem.Status.AVAILABLE,
+            )
+            for index in range(count)
+        ])
+
+    @patch("inventory.views.build_inventory_pdf")
+    def test_ceo_pdf_export_passes_all_tenant_records_to_the_generator(self, build_pdf):
+        self.create_export_items(60)
+        foreign_item = InventoryItem.objects.create(
+            company=self.other_ceo.company,
+            created_by=self.other_ceo,
+            project="Other company project",
+            unit_number="Private 1",
+            property_type="Villa",
+            size_sqft="2000",
+            floor="1",
+            basic_price="9000000",
+            landing="8000000",
+            status=InventoryItem.Status.SOLD,
+        )
+        build_pdf.return_value = b"%PDF-test"
+        self.client.force_authenticate(self.ceo)
+
+        response = self.client.get(reverse("inventory-pdf-export"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment; filename=\"niprix-inventory-", response["Content-Disposition"])
+        records = list(build_pdf.call_args.args[0])
+        self.assertEqual(len(records), 60)
+        self.assertEqual(records[0][0], "Export Project 5")  # model ordering is newest first
+        self.assertTrue(all(row[1] != foreign_item.unit_number for row in records))
+        self.assertEqual(records[0][7], 4500000)
+
+    def test_pdf_export_is_ceo_only(self):
+        self.client.force_authenticate(self.manager_user)
+        response = self.client.get(reverse("inventory-pdf-export"))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_pdf_export_handles_empty_and_multi_page_reports(self):
+        self.client.force_authenticate(self.ceo)
+        empty = self.client.get(reverse("inventory-pdf-export"))
+        self.assertEqual(empty.status_code, status.HTTP_200_OK)
+        self.assertTrue(empty.content.startswith(b"%PDF"))
+
+        self.create_export_items(90)
+        report = self.client.get(reverse("inventory-pdf-export"))
+        self.assertEqual(report.status_code, status.HTTP_200_OK)
+        self.assertTrue(report.content.startswith(b"%PDF"))
+        # Every laid-out page creates its own PDF Page object; 90 table rows
+        # cannot fit on one A4 landscape page at the report's row spacing.
+        self.assertGreaterEqual(report.content.count(b"/Type /Page"), 2)

@@ -20,8 +20,13 @@ class InvalidWebhook(ValueError):
     pass
 
 
+
 def _secret_for(provider):
-    return getattr(settings, "NIPRIX_WEBSITE_WEBHOOK_SECRET", "") if provider == "WEBSITE" else getattr(settings, "NIPRIX_META_WEBHOOK_SECRET", "")
+    if provider == "WEBSITE":
+        return getattr(settings, "NIPRIX_WEBSITE_WEBHOOK_SECRET", "")
+    if provider == "MAGICBRICKS":
+        return getattr(settings, "NIPRIX_MAGICBRICKS_API_KEY", "")
+    return getattr(settings, "NIPRIX_META_WEBHOOK_SECRET", "")
 
 
 def verify_signature(*, provider, raw_body, signature):

@@ -39,8 +39,54 @@ import {
 
 const TOKEN_KEY = "niprix.auth.tokens";
 let refreshInFlight: Promise<boolean> | null = null;
-let employeesCache: { value: Paginated<EmployeeOption> | EmployeeOption[]; expiresAt: number } | null = null;
-let employeesInFlight: Promise<Paginated<EmployeeOption> | EmployeeOption[]> | null = null;
+const DEFAULT_STALE_TIME_MS = 15_000;
+const MAX_RETAINED_CACHE_AGE_MS = 2 * 60_000;
+
+type QueryCacheEntry<T> = { data: T; updatedAt: number };
+
+// Data is intentionally memory-only. The access-token scoped key makes a
+// browser refresh/login/logout or token rotation unable to reuse another
+// session's CRM data, while maps below deduplicate concurrent reads.
+let cacheScope: string | null = null;
+let cacheUserId: number | null = null;
+let cacheEpoch = 0;
+const queryCache = new Map<string, QueryCacheEntry<unknown>>();
+const queryInFlight = new Map<string, Promise<unknown>>();
+
+function clearQueryCache() {
+  cacheEpoch += 1;
+  queryCache.clear();
+  queryInFlight.clear();
+}
+
+function cacheKey(path: string) {
+  return cacheScope ? `${cacheScope}:${path}` : null;
+}
+
+function invalidatePaths(prefixes: string[]) {
+  cacheEpoch += 1;
+  for (const key of queryCache.keys()) {
+    const path = key.slice(key.lastIndexOf(":/") + 1);
+    if (prefixes.some((prefix) => path.startsWith(prefix))) queryCache.delete(key);
+  }
+  for (const key of queryInFlight.keys()) {
+    const path = key.slice(key.lastIndexOf(":/") + 1);
+    if (prefixes.some((prefix) => path.startsWith(prefix))) queryInFlight.delete(key);
+  }
+}
+
+function invalidateForMutation(path: string) {
+  if (path.startsWith("/api/inventory/")) return invalidatePaths(["/api/inventory/"]);
+  if (path.startsWith("/api/leads/")) return invalidatePaths(["/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/follow-ups/") || path.startsWith("/api/tasks/")) return invalidatePaths(["/api/follow-ups/", "/api/tasks/", "/api/workspace/summary/", "/api/leads/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/raw-data/")) return invalidatePaths(["/api/raw-data/", "/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/attendance/")) return invalidatePaths(["/api/attendance/", "/api/employees/", "/api/hrms/dashboard/"]);
+  if (path.startsWith("/api/employees/")) return invalidatePaths(["/api/employees/", "/api/hrms/", "/api/attendance/", "/api/leads/", "/api/workspace/"]);
+  if (path.startsWith("/api/hrms/")) return invalidatePaths(["/api/hrms/", "/api/employees/"]);
+  if (path.startsWith("/api/reminder-preferences/")) return invalidatePaths(["/api/reminder-preferences/"]);
+  if (path.startsWith("/api/integrations/")) return invalidatePaths(["/api/integrations/"]);
+  if (path.startsWith("/api/notifications/")) return invalidatePaths(["/api/notifications/"]);
+}
 
 function getTokens(): Tokens | null {
   if (typeof window === "undefined") return null;
@@ -61,11 +107,22 @@ export function hasStoredSession() {
 
 export function saveTokens(tokens: Tokens) {
   window.sessionStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+  clearQueryCache();
+  cacheScope = cacheUserId ? `${cacheUserId}:${tokens.access}` : null;
 }
 
 export function clearTokens() {
   window.sessionStorage.removeItem(TOKEN_KEY);
-  employeesCache = null;
+  cacheScope = null;
+  cacheUserId = null;
+  clearQueryCache();
+}
+
+export function setCacheScope(user: Pick<User, "id">) {
+  const tokens = getTokens();
+  cacheUserId = user.id;
+  cacheScope = tokens?.access ? `${user.id}:${tokens.access}` : null;
+  clearQueryCache();
 }
 
 async function errorFrom(response: Response): Promise<ApiError> {
@@ -182,12 +239,115 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       clearTokens();
       window.dispatchEvent(new Event("niprix:unauthorized"));
     }
+    if (error.status === 403) invalidatePaths([path]);
     throw error;
+  }
+
+  if (init.method && !["GET", "HEAD"].includes(init.method.toUpperCase())) {
+    invalidateForMutation(path);
   }
 
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+function cachedGet<T>(path: string, staleTimeMs = DEFAULT_STALE_TIME_MS): Promise<T> {
+  const key = cacheKey(path);
+  if (!key) return request<T>(path);
+
+  const existing = queryCache.get(key) as QueryCacheEntry<T> | undefined;
+  if (existing && Date.now() - existing.updatedAt <= staleTimeMs) return Promise.resolve(existing.data);
+
+  const inFlight = queryInFlight.get(key) as Promise<T> | undefined;
+  if (inFlight) return inFlight;
+
+  const epoch = cacheEpoch;
+  const fetchPromise = request<T>(path)
+    .then((data) => {
+      // A mutation or logout that happened while this request was in flight
+      // must not repopulate cache entries with a now-stale response.
+      if (epoch === cacheEpoch && cacheKey(path) === key) {
+        queryCache.set(key, { data, updatedAt: Date.now() });
+      }
+      return data;
+    })
+    .finally(() => {
+      if (queryInFlight.get(key) === fetchPromise) queryInFlight.delete(key);
+    });
+
+  queryInFlight.set(key, fetchPromise);
+  return fetchPromise;
+}
+
+function peekCached<T>(path: string): T | undefined {
+  const key = cacheKey(path);
+  if (!key) return undefined;
+  const entry = queryCache.get(key) as QueryCacheEntry<T> | undefined;
+  if (!entry) return undefined;
+  if (Date.now() - entry.updatedAt > MAX_RETAINED_CACHE_AGE_MS) {
+    queryCache.delete(key);
+    return undefined;
+  }
+  return entry.data;
+}
+
+
+function primeLeadFromList(lead: Lead) {
+  const path = `/api/leads/${lead.id}/`;
+  const key = cacheKey(path);
+
+  if (!key || queryCache.has(key)) return;
+
+  queryCache.set(key, {
+    data: lead,
+    updatedAt: Date.now() - 10_001,
+  });
+}
+
+
+async function requestBlob(path: string, retry = true): Promise<Blob> {
+  const tokens = getTokens();
+  const response = await fetchApi(path, {
+    headers: {
+      Accept: "application/pdf",
+      ...(tokens?.access ? { Authorization: `Bearer ${tokens.access}` } : {}),
+    },
+  });
+  if (response.status === 401 && retry && (await refreshAccessToken())) return requestBlob(path, false);
+  if (!response.ok) {
+    const error = await errorFrom(response);
+    if (error.status === 401) {
+      clearTokens();
+      window.dispatchEvent(new Event("niprix:unauthorized"));
+    }
+    throw error;
+  }
+  return response.blob();
+}
+
+
+
+export function preloadSalesSectionData(role: string) {
+  const requests: Promise<unknown>[] = [
+    api.leads("page=1&page_size=25"),
+    api.leadSummary(),
+    api.followUps("page=1&page_size=20"),
+    api.workspaceSummary(),
+    api.employees(),
+  ];
+
+  if (role !== "EMPLOYEE") {
+    requests.push(
+      api.recoveryLeads("NOT_PICK_CALL", "page=1&page_size=12"),
+      api.leadRecoverySummary(),
+    );
+  }
+
+  void Promise.allSettled(requests);
+}
+
+
+
 
 export const api = {
   async login(username: string, password: string) {
@@ -200,23 +360,23 @@ export const api = {
     return response.json() as Promise<Tokens>;
   },
   me: () => request<User>("/api/auth/me/"),
-  notifications: (page = 1) => request<Paginated<Notification>>(`/api/notifications/?page=${page}&page_size=20`),
-  notificationUnreadCount: () => request<{ count: number }>("/api/notifications/unread-count/"),
+  notifications: (page = 1) => cachedGet<Paginated<Notification>>(`/api/notifications/?page=${page}&page_size=20`, 5_000),
+  notificationUnreadCount: () => cachedGet<{ count: number }>("/api/notifications/unread-count/", 5_000),
   markNotificationRead: (id: number) => request<Notification>(`/api/notifications/${id}/read/`, { method: "POST", body: "{}" }),
   markAllNotificationsRead: () => request<void>("/api/notifications/mark-all-read/", { method: "POST", body: "{}" }),
-  currentAttendance: () => request<CurrentAttendance>("/api/attendance/current/"),
+  currentAttendance: () => cachedGet<CurrentAttendance>("/api/attendance/current/", 10_000),
   checkIn: () => request<AttendanceRecord>("/api/attendance/check-in/", { method: "POST" }),
   checkOut: () => request<AttendanceRecord>("/api/attendance/check-out/", { method: "POST" }),
   submitLiveLocation: (position: { latitude: number; longitude: number; accuracy: number }) => request<LiveLocation>("/api/attendance/live-location/", { method: "POST", body: JSON.stringify(position) }),
   reportLiveLocationStatus: (status: "permission_denied" | "position_unavailable" | "timeout" | "missing_coordinates") => request<LiveLocation>("/api/attendance/live-location/", { method: "POST", body: JSON.stringify({ status }) }),
-  employeeLiveLocation: (id: number) => request<LiveLocation>(`/api/employees/${id}/live-location/`),
+  employeeLiveLocation: (id: number) => cachedGet<LiveLocation>(`/api/employees/${id}/live-location/`, 10_000),
   attendanceHistory: (page = 1, date?: string) =>
-  request<Paginated<AttendanceRecord> | AttendanceRecord[]>(
+  cachedGet<Paginated<AttendanceRecord> | AttendanceRecord[]>(
     `/api/attendance/?page=${page}&page_size=6${
       date ? `&date_from=${date}&date_to=${date}` : ""
     }`,
   ),
-  attendanceSummary: (date?: string) => request<import("@/lib/types").AttendanceWorkspace>(`/api/attendance/summary/${date ? `?date=${date}` : ""}`),
+  attendanceSummary: (date?: string) => cachedGet<import("@/lib/types").AttendanceWorkspace>(`/api/attendance/summary/${date ? `?date=${date}` : ""}`, 10_000),
   correctAttendance: (
     id: number,
     body: { check_in_at?: string; check_out_at?: string | null; reason: string },
@@ -225,48 +385,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  employees: async () => {
-    // Employee options change infrequently, while lead/work filters change on
-    // every selection. A short in-memory reuse removes redundant requests
-    // without persisting stale CRM data across sessions.
-    if (employeesCache && employeesCache.expiresAt > Date.now()) return employeesCache.value;
-    if (!employeesInFlight) {
-      employeesInFlight = request<Paginated<EmployeeOption> | EmployeeOption[]>("/api/employees/?page=1&page_size=100")
-        .then((value) => {
-          employeesCache = { value, expiresAt: Date.now() + 15_000 };
-          return value;
-        })
-        .finally(() => { employeesInFlight = null; });
-    }
-    return employeesInFlight;
-  },
-  employeeDirectory: (query = "") => request<Paginated<EmployeeProfile> | EmployeeProfile[]>(`/api/employees/?page=1&page_size=100${query ? `&${query}` : ""}`),
+  employees: () => cachedGet<Paginated<EmployeeOption> | EmployeeOption[]>("/api/employees/?page=1&page_size=100", 15_000),
+  employeeDirectory: (query = "") => cachedGet<Paginated<EmployeeProfile> | EmployeeProfile[]>(`/api/employees/?page=1&page_size=100${query ? `&${query}` : ""}`, 15_000),
   createEmployee: (body: Record<string, unknown>) => request<EmployeeProfile>("/api/employees/create/", { method: "POST", body: JSON.stringify(body) }),
-  employee: (id: number) => request<EmployeeProfile>(`/api/employees/${id}/`),
-  employeeOverview: (id: number) => request<EmployeeOverview>(`/api/employees/${id}/overview/`),
-  employeePerformance: (id: number) => request<EmployeePerformance>(`/api/employees/${id}/performance/`),
-  employeeAttendance: (id: number) => request<AttendanceRecord[]>(`/api/employees/${id}/attendance/`),
-  employeeLeads: (id: number) => request<Lead[]>(`/api/employees/${id}/leads/`),
-  employeeWork: (id: number) => request<EmployeeWork>(`/api/employees/${id}/work/`),
-  employeeActivity: (id: number) => request<Array<{ id: number; action: string; actor: string; created_at: string; reason: string }>>(`/api/employees/${id}/activity/`),
+  employee: (id: number) => cachedGet<EmployeeProfile>(`/api/employees/${id}/`),
+  employeeOverview: (id: number) => cachedGet<EmployeeOverview>(`/api/employees/${id}/overview/`),
+  employeePerformance: (id: number) => cachedGet<EmployeePerformance>(`/api/employees/${id}/performance/`),
+  employeeAttendance: (id: number) => cachedGet<AttendanceRecord[]>(`/api/employees/${id}/attendance/`),
+  employeeLeads: (id: number) => cachedGet<Lead[]>(`/api/employees/${id}/leads/`),
+  employeeWork: (id: number) => cachedGet<EmployeeWork>(`/api/employees/${id}/work/`),
+  employeeActivity: (id: number) => cachedGet<Array<{ id: number; action: string; actor: string; created_at: string; reason: string }>>(`/api/employees/${id}/activity/`),
   deactivateEmployee: (id: number) => request<{ already_deactivated: boolean; leads_reassigned: number; follow_ups_reassigned: number }>(`/api/employees/${id}/deactivate/`, { method: "POST" }),
   setEmployeeAssignmentEligibility: (id: number, can_receive_leads: boolean) => request<{ employee: EmployeeProfile; changed: boolean }>(`/api/employees/${id}/assignment-eligibility/`, { method: "POST", body: JSON.stringify({ can_receive_leads }) }),
   deleteEmployee: (id: number) => request<void>(`/api/employees/${id}/delete/`, { method: "DELETE" }),
   updateEmployeeSelf: (id: number, body: FormData) => request<EmployeeProfile>(`/api/employees/${id}/`, { method: "PATCH", body }),
-  leaveTypes: () => request<LeaveType[]>("/api/hrms/leave-types/"),
+  leaveTypes: () => cachedGet<LeaveType[]>("/api/hrms/leave-types/"),
   createLeaveType: (body: Partial<LeaveType>) => request<LeaveType>("/api/hrms/leave-types/", { method: "POST", body: JSON.stringify(body) }),
   updateLeaveType: (id: number, body: Partial<LeaveType>) => request<LeaveType>(`/api/hrms/leave-types/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteLeaveType: (id: number) => request<void>(`/api/hrms/leave-types/${id}/`, { method: "DELETE" }),
-  leaveBalances: () => request<import("@/lib/types").LeaveBalance[]>("/api/hrms/leave-balances/"),
+  leaveBalances: () => cachedGet<import("@/lib/types").LeaveBalance[]>("/api/hrms/leave-balances/"),
   updateLeaveBalance: (id: number, allocated_days: string) => request<import("@/lib/types").LeaveBalance>(`/api/hrms/leave-balances/${id}/`, { method: "PATCH", body: JSON.stringify({ allocated_days }) }),
-  leaveRequests: () => request<LeaveRequest[]>("/api/hrms/leave-requests/"),
+  leaveRequests: () => cachedGet<LeaveRequest[]>("/api/hrms/leave-requests/"),
   createLeaveRequest: (body: { leave_type: number; start_date: string; end_date: string; reason: string }) => request<LeaveRequest>("/api/hrms/leave-requests/", { method: "POST", body: JSON.stringify(body) }),
   leaveAction: (id: number, action: "cancel" | "approve" | "reject", comment = "") => request<LeaveRequest>(`/api/hrms/leave-requests/${id}/${action}/`, { method: "POST", body: JSON.stringify({ comment }) }),
-  holidays: () => request<import("@/lib/types").Holiday[]>("/api/hrms/holidays/"),
+  holidays: () => cachedGet<import("@/lib/types").Holiday[]>("/api/hrms/holidays/"),
   createHoliday: (body: { name: string; holiday_date: string; description?: string }) => request<import("@/lib/types").Holiday>("/api/hrms/holidays/", { method: "POST", body: JSON.stringify(body) }),
   deleteHoliday: (id: number) => request<void>(`/api/hrms/holidays/${id}/`, { method: "DELETE" }),
-  hrDashboard: () => request<import("@/lib/types").HRDashboard>("/api/hrms/dashboard/"),
-  employeeDocuments: () => request<import("@/lib/types").EmployeeDocument[]>("/api/hrms/documents/"),
+  hrDashboard: () => cachedGet<import("@/lib/types").HRDashboard>("/api/hrms/dashboard/"),
+  employeeDocuments: () => cachedGet<import("@/lib/types").EmployeeDocument[]>("/api/hrms/documents/"),
   uploadEmployeeDocument: (employeeId: number, body: FormData) => request<import("@/lib/types").EmployeeDocument>(`/api/hrms/employees/${employeeId}/documents/`, { method: "POST", body }),
   async downloadEmployeeDocument(id: number) {
     const tokens = getTokens();
@@ -275,59 +421,68 @@ export const api = {
     return response.blob();
   },
   deleteEmployeeDocument: (id: number) => request<void>(`/api/hrms/documents/${id}/`, { method: "DELETE" }),
-  workspaceSummary: () => request<WorkspaceSummary>("/api/workspace/summary/"),
-  followUps: (query = "") => request<Paginated<FollowUp>>(`/api/follow-ups/?${query}`),
-  followUp: (id: number) => request<FollowUp>(`/api/follow-ups/${id}/`),
+  workspaceSummary: () => cachedGet<WorkspaceSummary>("/api/workspace/summary/", 10_000),
+  peekWorkspaceSummary: () => peekCached<WorkspaceSummary>("/api/workspace/summary/"),
+  followUps: (query = "") => cachedGet<Paginated<FollowUp>>(`/api/follow-ups/?${query}`, 10_000),
+  peekFollowUps: (query = "") => peekCached<Paginated<FollowUp>>(`/api/follow-ups/?${query}`),
+  followUp: (id: number) => cachedGet<FollowUp>(`/api/follow-ups/${id}/`),
   createFollowUp: (body: { title: string; description?: string; assigned_to: number; lead?: number; customer_name?: string; customer_phone?: string; customer_progress?: string; interaction_notes?: string; outcome_reason?: string; next_action?: string; next_action_at?: string | null; scheduled_at: string; follow_up_type?: string; priority?: string; status?: string }) => request<FollowUp>("/api/follow-ups/", { method: "POST", body: JSON.stringify(body) }),
   updateFollowUp: (id: number, body: { title?: string; description?: string; assigned_to?: number; lead?: number; customer_name?: string; customer_phone?: string; customer_progress?: string; interaction_notes?: string; outcome_reason?: string; next_action?: string; next_action_at?: string | null; scheduled_at?: string; follow_up_type?: string; priority?: string; status?: string; activity_note?: string }) => request<FollowUp>(`/api/follow-ups/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   completeFollowUp: (id: number, note = "") => request<FollowUp>(`/api/follow-ups/${id}/complete/`, { method: "POST", body: JSON.stringify({ note }) }),
   postponeFollowUp: (id: number, scheduled_at: string, note = "") => request<FollowUp>(`/api/follow-ups/${id}/postpone/`, { method: "POST", body: JSON.stringify({ scheduled_at, note }) }),
   reassignFollowUp: (id: number, assigned_to: number, note = "") => request<FollowUp>(`/api/follow-ups/${id}/reassign/`, { method: "POST", body: JSON.stringify({ assigned_to, note }) }),
-  followUpActivities: (id: number) => request<Paginated<FollowUpActivity>>(`/api/follow-ups/${id}/activities/`),
+  followUpActivities: (id: number) => cachedGet<Paginated<FollowUpActivity>>(`/api/follow-ups/${id}/activities/`),
   deleteFollowUp: (id: number) => request<void>(`/api/follow-ups/${id}/`, { method: "DELETE" }),
-  tasks: (query = "") => request<Paginated<Task>>(`/api/tasks/?${query}`),
+  tasks: (query = "") => cachedGet<Paginated<Task>>(`/api/tasks/?${query}`, 10_000),
   createTask: (body: { title: string; description?: string; assigned_to: number; lead?: number; due_date: string; due_time?: string | null; priority?: string; status?: string }) => request<Task>("/api/tasks/", { method: "POST", body: JSON.stringify(body) }),
   updateTask: (id: number, body: { title?: string; description?: string; assigned_to?: number; due_date?: string; due_time?: string | null; priority?: string; status?: string }) => request<Task>(`/api/tasks/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   completeTask: (id: number) => request<Task>(`/api/tasks/${id}/complete/`, { method: "POST", body: "{}" }),
   reassignTask: (id: number, assigned_to: number) => request<Task>(`/api/tasks/${id}/reassign/`, { method: "POST", body: JSON.stringify({ assigned_to }) }),
-  reminderPreferences: () => request<ReminderPreference>("/api/reminder-preferences/"),
+  reminderPreferences: () => cachedGet<ReminderPreference>("/api/reminder-preferences/"),
   updateReminderPreferences: (body: Partial<ReminderPreference>) => request<ReminderPreference>("/api/reminder-preferences/", { method: "PATCH", body: JSON.stringify(body) }),
-  leads: (query = "") => request<Paginated<Lead>>(`/api/leads/?${query}`),
-  recoveryLeads: (category: "NOT_PICK_CALL" | "NOT_INTERESTED", query = "") => request<Paginated<RecoveryLead>>(`/api/leads/recovery/?category=${category}${query ? `&${query}` : ""}`),
-  leadRecoverySummary: () => request<LeadRecoverySummary>("/api/leads/recovery/summary/"),
+  leads: (query = "") => cachedGet<Paginated<Lead>>(`/api/leads/?${query}`, 10_000),
+  peekLeads: (query = "") => peekCached<Paginated<Lead>>(`/api/leads/?${query}`),
+  peekLead: (id: number) => peekCached<Lead>(`/api/leads/${id}/`),
+primeLeadFromList: (lead: Lead) => primeLeadFromList(lead),
+  recoveryLeads: (category: "NOT_PICK_CALL" | "NOT_INTERESTED", query = "") => cachedGet<Paginated<RecoveryLead>>(`/api/leads/recovery/?category=${category}${query ? `&${query}` : ""}`, 10_000),
+  leadRecoverySummary: () => cachedGet<LeadRecoverySummary>("/api/leads/recovery/summary/", 10_000),
   moveLeadToFollowUp: (id: number, body: { title?: string; description?: string; scheduled_at: string; follow_up_type?: string; priority?: string }) => request<{ follow_up: FollowUp; created: boolean }>(`/api/leads/${id}/move-to-follow-up/`, { method: "POST", body: JSON.stringify(body) }),
-  lead: (id: number) => request<Lead>(`/api/leads/${id}/`),
-  leadSummary: () => request<LeadSummary>("/api/leads/summary/"),
+  lead: (id: number) => cachedGet<Lead>(`/api/leads/${id}/`),
+  leadSummary: () => cachedGet<LeadSummary>("/api/leads/summary/", 10_000),
+  peekLeadSummary: () => peekCached<LeadSummary>("/api/leads/summary/"),
   createLead: (body: Record<string, unknown>) => request<Lead>("/api/leads/", { method: "POST", body: JSON.stringify(body) }),
   updateLead: (id: number, body: Record<string, unknown>) => request<Lead>(`/api/leads/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   assignLead: (id: number, assigned_to: number, note = "") => request<Lead>(`/api/leads/${id}/assign/`, { method: "POST", body: JSON.stringify({ assigned_to, note }) }),
   markLeadNotPicked: (id: number, note = "") => request<Lead>(`/api/leads/${id}/mark-not-picked/`, { method: "POST", body: JSON.stringify({ note }) }),
   restoreLead: (id: number, note = "") => request<Lead>(`/api/leads/${id}/restore/`, { method: "POST", body: JSON.stringify({ note }) }),
-  leadActivities: (id: number) => request<Paginated<LeadActivity>>(`/api/leads/${id}/activities/`),
+  leadActivities: (id: number) => cachedGet<Paginated<LeadActivity>>(`/api/leads/${id}/activities/`),
   addLeadNote: (id: number, note: string) => request<LeadActivity>(`/api/leads/${id}/activities/`, { method: "POST", body: JSON.stringify({ note }) }),
-  leadSources: (id: number) => request<Paginated<LeadSource>>(`/api/leads/${id}/sources/`),
-  leadAssignments: (id: number) => request<Paginated<LeadAssignment>>(`/api/leads/${id}/assignments/`),
+  leadSources: (id: number) => cachedGet<Paginated<LeadSource>>(`/api/leads/${id}/sources/`),
+  leadAssignments: (id: number) => cachedGet<Paginated<LeadAssignment>>(`/api/leads/${id}/assignments/`),
   deleteLead: (id: number) => request<void>(`/api/leads/${id}/`, { method: "DELETE" }),
-  rawLeads: (query = "") => request<Paginated<RawLead>>(`/api/raw-data/?${query}`),
-  rawDataSummary: () => request<RawDataSummary>("/api/raw-data/summary/"),
+  rawLeads: (query = "") => cachedGet<Paginated<RawLead>>(`/api/raw-data/?${query}`, 10_000),
+  rawDataSummary: () => cachedGet<RawDataSummary>("/api/raw-data/summary/", 10_000),
   createRawLead: (body: Record<string, unknown>) => request<RawLead>("/api/raw-data/", { method: "POST", body: JSON.stringify(body) }),
   updateRawLead: (id: number, body: Record<string, unknown>) => request<RawLead>(`/api/raw-data/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteRawLead: (id: number) => request<void>(`/api/raw-data/${id}/`, { method: "DELETE" }),
   previewRawData: (body: FormData | { rows: object[] }) => request<RawPreview>("/api/raw-data/preview/", { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body) }),
   saveRawPreview: (rows: object[]) => request<{ created: number }>("/api/raw-data/save-preview/", { method: "POST", body: JSON.stringify({ rows }) }),
-  rawEligibleEmployees: () => request<RawEligibleEmployee[]>("/api/raw-data/eligible-employees/"),
+  rawEligibleEmployees: () => cachedGet<RawEligibleEmployee[]>("/api/raw-data/eligible-employees/", 15_000),
   previewRawDistribution: (body: Record<string, unknown>) => request<RawDistributionPreview>("/api/raw-data/distribution-preview/", { method: "POST", body: JSON.stringify(body) }),
   distributeRawData: (body: Record<string, unknown>) => request<{ distributed: number }>("/api/raw-data/distribute/", { method: "POST", body: JSON.stringify(body) }),
-  inventory: (query = "") => request<Paginated<InventoryItem>>(`/api/inventory/?${query}`),
-  inventorySummary: () => request<InventorySummary>("/api/inventory/summary/"),
+  inventory: (query = "") => cachedGet<Paginated<InventoryItem>>(`/api/inventory/?${query}`, 10_000),
+  inventorySummary: () => cachedGet<InventorySummary>("/api/inventory/summary/", 10_000),
+  peekInventory: (query = "") => peekCached<Paginated<InventoryItem>>(`/api/inventory/?${query}`),
+  peekInventorySummary: () => peekCached<InventorySummary>("/api/inventory/summary/"),
+  downloadInventoryPdf: () => requestBlob("/api/inventory/export/pdf/"),
   createInventory: (body: Record<string, unknown>) => request<InventoryItem>("/api/inventory/", { method: "POST", body: JSON.stringify(body) }),
   bulkCreateInventory: (items: Record<string, unknown>[]) => request<InventoryItem[]>("/api/inventory/bulk/", { method: "POST", body: JSON.stringify({ items }) }),
   updateInventory: (id: number, body: Record<string, unknown>) => request<InventoryItem>(`/api/inventory/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteInventory: (id: number) => request<void>(`/api/inventory/${id}/`, { method: "DELETE" }),
-  integrations: () => request<Paginated<IntegrationConfiguration>>("/api/integrations/?page=1&page_size=100"),
+  integrations: () => cachedGet<Paginated<IntegrationConfiguration>>("/api/integrations/?page=1&page_size=100", 15_000),
   createIntegration: (body: Pick<IntegrationConfiguration, "provider" | "branch" | "external_account_id" | "is_enabled">) => request<IntegrationConfiguration>("/api/integrations/", { method: "POST", body: JSON.stringify(body) }),
   updateIntegration: (id: number, body: Partial<Pick<IntegrationConfiguration, "branch" | "external_account_id" | "is_enabled">>) => request<IntegrationConfiguration>(`/api/integrations/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
-  integrationEvents: () => request<Paginated<IntegrationEvent>>("/api/integrations/events/?page=1&page_size=100"),
+  integrationEvents: () => cachedGet<Paginated<IntegrationEvent>>("/api/integrations/events/?page=1&page_size=100", 15_000),
   async logout() {
     const tokens = getTokens();
     try {

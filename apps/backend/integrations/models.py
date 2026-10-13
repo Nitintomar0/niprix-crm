@@ -4,6 +4,7 @@ from django.db.models import Q
 
 class IntegrationConfiguration(models.Model):
     class Provider(models.TextChoices):
+        MAGICBRICKS = "MAGICBRICKS", "Magicbricks"
         WHATSAPP = "WHATSAPP", "WhatsApp"
         FACEBOOK = "FACEBOOK", "Facebook Lead Ads"
         INSTAGRAM = "INSTAGRAM", "Instagram"

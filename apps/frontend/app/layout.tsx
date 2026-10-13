@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
+import { NiprixAuthProvider } from "@/components/niprix-auth-provider";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist", subsets: ["latin"] });
@@ -11,5 +12,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  return <html lang="en" className={geist.variable}><body>{children}</body></html>;
+  return <html lang="en" className={geist.variable}><body><NiprixAuthProvider>{children}</NiprixAuthProvider></body></html>;
 }
