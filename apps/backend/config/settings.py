@@ -31,6 +31,10 @@ ALLOWED_HOSTS = config(
 NIPRIX_META_WEBHOOK_SECRET = config("NIPRIX_META_WEBHOOK_SECRET", default="")
 NIPRIX_WEBSITE_WEBHOOK_SECRET = config("NIPRIX_WEBSITE_WEBHOOK_SECRET", default="")
 NIPRIX_MAGICBRICKS_API_KEY = config("NIPRIX_MAGICBRICKS_API_KEY", default="")
+# Bound webhook bodies before parsing or persisting them.  This applies to the
+# unauthenticated Magicbricks endpoint; tune it only when a documented payload
+# requires a larger body.
+NIPRIX_MAX_WEBHOOK_PAYLOAD_BYTES = config("NIPRIX_MAX_WEBHOOK_PAYLOAD_BYTES", default=262144, cast=int)
 
 # Application definition
 

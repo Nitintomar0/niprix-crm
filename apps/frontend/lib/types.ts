@@ -32,7 +32,7 @@ export interface FollowUpActivity { id: number; performed_by: number; performed_
 export interface Task { id: number; branch: number; title: string; description: string; assigned_to: number; assigned_to_detail: EmployeeReference; created_by: number; created_by_name: string; related_follow_up: number | null; due_date: string; due_time: string | null; priority: WorkPriority; status: TaskStatus; completed_at: string | null; created_at: string; updated_at: string; }
 export interface WorkspaceSummary { scope: "company" | "team" | "personal"; follow_ups: { today: number; pending: number; completed: number; upcoming: number; overdue: number; }; tasks: { assigned: number; due_today: number; overdue: number; completed: number; }; }
 export interface ReminderPreference { upcoming_follow_up_reminders_enabled: boolean; overdue_follow_up_reminders_enabled: boolean; overdue_task_reminders_enabled: boolean; reminder_lead_minutes: number; daily_summary_enabled: boolean; created_at: string; updated_at: string; }
-export type LeadSourceKind = "WHATSAPP" | "FACEBOOK" | "INSTAGRAM" | "META_LEAD_AD" | "WEBSITE" | "MANUAL" | "REFERRAL" | "OTHER";
+export type LeadSourceKind = "MAGICBRICKS" | "WHATSAPP" | "FACEBOOK" | "INSTAGRAM" | "META_LEAD_AD" | "WEBSITE" | "MANUAL" | "REFERRAL" | "OTHER";
 export type LeadStatus = "NEW" | "CONTACTED" | "SITE_VISIT_REQUESTED" | "SITE_VISIT_DONE" | "FOLLOW_UP_NEEDED" | "FOLLOW_UP_DONE" | "POSTPONED" | "DIFFERENT_REQUIREMENT" | "NOT_INTERESTED" | "CLOSED" | "INVALID_PHONE" | "NOT_LOOKING_PROPERTY" | "USER_IS_AGENT";
 export type LeadTemperature = "HOT" | "WARM" | "COLD";
 export type LeadRecoveryCategory = "NOT_PICK_CALL" | "NOT_INTERESTED";
@@ -52,6 +52,6 @@ export interface RawDistributionPreview { raw_lead_ids: number[]; total: number;
 export type InventoryStatus = "AVAILABLE" | "HOLD" | "BOOKED" | "SOLD" | "BLOCKED" | "RESERVED";
 export interface InventoryItem { id: number; project: string; unit_number: string; property_type: string; size_sqft: string; floor: string; basic_price: string; landing?: string | null; status: InventoryStatus; booking_date: string | null; created_at: string; updated_at: string; }
 export interface InventorySummary { total: number; available: number; hold: number; booked: number; sold: number; landing_total?: string; }
-export type IntegrationProvider = "WHATSAPP" | "FACEBOOK" | "INSTAGRAM" | "WEBSITE";
+export type IntegrationProvider = "MAGICBRICKS" | "WHATSAPP" | "FACEBOOK" | "INSTAGRAM" | "WEBSITE";
 export interface IntegrationConfiguration { id: number; provider: IntegrationProvider; branch: number; external_account_id: string; is_enabled: boolean; status: "NOT_CONNECTED" | "CONFIGURED" | "ERROR"; secret_configured: boolean; last_success_at: string | null; last_failure_at: string | null; last_failure_message: string; failed_event_count: number; created_at: string; updated_at: string; }
 export interface IntegrationEvent { id: number; provider: IntegrationProvider; event_type: string; external_event_id: string; external_lead_id: string; lead_id: number | null; status: string; received_at: string; processed_at: string | null; retry_count: number; error_message: string; }

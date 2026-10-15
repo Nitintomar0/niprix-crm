@@ -5,6 +5,7 @@ from django.db.models import Q
 
 class Lead(models.Model):
     class Source(models.TextChoices):
+        MAGICBRICKS = "MAGICBRICKS", "Magicbricks"
         WHATSAPP = "WHATSAPP", "WhatsApp"
         FACEBOOK = "FACEBOOK", "Facebook"
         INSTAGRAM = "INSTAGRAM", "Instagram"

@@ -1,4 +1,7 @@
+import hmac
 import json
+
+from django.conf import settings
 
 from rest_framework import generics, status
 from rest_framework.exceptions import NotAuthenticated, PermissionDenied, ValidationError
@@ -10,11 +13,17 @@ from leads.views import LeadPagination
 
 from .models import IntegrationConfiguration, IntegrationEvent
 from .serializers import IntegrationConfigurationSerializer, IntegrationEventSerializer
-from .services import InvalidWebhook, process_webhook, verify_signature
+from .services import InvalidWebhook, process_webhook, retry_failed_event, verify_signature
 
 
 def _is_admin(user):
     return bool(user and user.is_authenticated and (user.is_superuser or user.role == "CEO"))
+
+
+def _has_valid_magicbricks_api_key(request):
+    expected_key = settings.NIPRIX_MAGICBRICKS_API_KEY
+    provided_key = request.headers.get("X-API-Key", "")
+    return bool(expected_key and provided_key and hmac.compare_digest(expected_key, provided_key))
 
 
 class IntegrationConfigurationListCreateView(generics.ListCreateAPIView):
@@ -62,6 +71,26 @@ class IntegrationEventListView(generics.ListAPIView):
         return queryset
 
 
+class IntegrationEventRetryView(APIView):
+    """CEO-only, explicit recovery for a durably recorded failed event."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        if not _is_admin(request.user):
+            raise PermissionDenied("Only CEO users can retry integration events.")
+        event = IntegrationEvent.objects.filter(company=request.user.company, pk=pk).first()
+        if not event:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            result = retry_failed_event(event=event)
+        except ValidationError as error:
+            return Response(error.detail, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"detail": "Webhook processing failed."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        return Response({"status": result.event.status, "duplicate": result.duplicate}, status=status.HTTP_200_OK)
+
+
 class WebhookView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -107,19 +136,7 @@ class MagicbricksWebhookView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        import hmac
-        from django.conf import settings
-
-        expected_key = settings.NIPRIX_MAGICBRICKS_API_KEY
-        provided_key = request.headers.get("X-API-Key", "")
-
-        if not expected_key or not provided_key:
-            return Response(
-                {"detail": "Invalid API key."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if not hmac.compare_digest(expected_key, provided_key):
+        if not _has_valid_magicbricks_api_key(request):
             return Response(
                 {"detail": "Invalid API key."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -127,6 +144,11 @@ class MagicbricksWebhookView(APIView):
 
         try:
             raw_body = request.body
+            if len(raw_body) > settings.NIPRIX_MAX_WEBHOOK_PAYLOAD_BYTES:
+                return Response(
+                    {"detail": "Webhook body is too large."},
+                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                )
             payload = json.loads(raw_body.decode("utf-8"))
             result = process_webhook(
                 provider="MAGICBRICKS",
@@ -158,3 +180,15 @@ class MagicbricksWebhookView(APIView):
             {"status": result.event.status, "duplicate": result.duplicate},
             status=status.HTTP_200_OK,
         )
+
+
+class MagicbricksWebhookReadinessView(APIView):
+    """Internal key-path diagnostic; it never processes a webhook payload."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        if not _has_valid_magicbricks_api_key(request):
+            return Response({"detail": "Invalid API key."}, status=status.HTTP_403_FORBIDDEN)
+        return Response({"status": "authenticated", "diagnostic": True}, status=status.HTTP_200_OK)

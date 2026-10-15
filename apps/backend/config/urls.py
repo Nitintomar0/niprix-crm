@@ -18,8 +18,8 @@ from leads.views import (
 
 from integrations.views import (
     FacebookWebhookView, InstagramWebhookView, IntegrationConfigurationDetailView,
-    IntegrationConfigurationListCreateView, IntegrationEventListView, WebsiteIntakeView,
-    WhatsAppWebhookView, MagicbricksWebhookView,
+    IntegrationConfigurationListCreateView, IntegrationEventListView, IntegrationEventRetryView, WebsiteIntakeView,
+    WhatsAppWebhookView, MagicbricksWebhookReadinessView, MagicbricksWebhookView,
 )
 
 from organizations.views import EmployeeOverviewView, EmployeePerformanceView, EmployeeAttendanceView, EmployeeActivityView, EmployeeLeadsView, EmployeeWorkView
@@ -155,11 +155,13 @@ urlpatterns = [
     path("api/integrations/", IntegrationConfigurationListCreateView.as_view(), name="integration-list"),
     path("api/integrations/<int:pk>/", IntegrationConfigurationDetailView.as_view(), name="integration-detail"),
     path("api/integrations/events/", IntegrationEventListView.as_view(), name="integration-events"),
+    path("api/integrations/events/<int:pk>/retry/", IntegrationEventRetryView.as_view(), name="integration-event-retry"),
     path("api/integrations/webhooks/whatsapp/", WhatsAppWebhookView.as_view(), name="webhook-whatsapp"),
     path("api/integrations/webhooks/facebook/", FacebookWebhookView.as_view(), name="webhook-facebook"),
     path("api/integrations/webhooks/instagram/", InstagramWebhookView.as_view(), name="webhook-instagram"),
     path("api/integrations/website/", WebsiteIntakeView.as_view(), name="website-intake"),
     path("api/integrations/webhooks/magicbricks/", MagicbricksWebhookView.as_view(), name="webhook-magicbricks"),
+    path("api/integrations/diagnostics/magicbricks/readiness/", MagicbricksWebhookReadinessView.as_view(), name="magicbricks-readiness"),
     path("api/hrms/leave-types/", LeaveTypeListView.as_view(), name="leave-type-list"),
     path("api/hrms/leave-types/<int:pk>/", LeaveTypeDetailView.as_view(), name="leave-type-detail"),
     path("api/hrms/leave-balances/", LeaveBalanceListView.as_view(), name="leave-balance-list"),

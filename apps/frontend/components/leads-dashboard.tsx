@@ -35,6 +35,7 @@ const statuses = [
 ];
 const sources = [
   "MANUAL",
+  "MAGICBRICKS",
   "WHATSAPP",
   "FACEBOOK",
   "INSTAGRAM",

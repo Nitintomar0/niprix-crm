@@ -146,3 +146,134 @@ class IntegrationAPITests(APITestCase):
         self.assertEqual(self.client.delete(reverse("lead-detail", args=[assigned.pk])).status_code, status.HTTP_403_FORBIDDEN)
         self.client.force_authenticate(self.manager_user)
         self.assertEqual(self.client.delete(reverse("lead-detail", args=[unrelated_lead.pk])).status_code, status.HTTP_404_NOT_FOUND)
+
+
+@override_settings(NIPRIX_MAGICBRICKS_API_KEY="magicbricks-test-key", NIPRIX_MAX_WEBHOOK_PAYLOAD_BYTES=512)
+class MagicbricksWebhookTests(APITestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Magicbricks Realty")
+        self.branch = Branch.objects.create(company=self.company, name="Noida", city="Noida")
+        self.department = Department.objects.create(branch=self.branch, name="Sales")
+        self.ceo = User.objects.create_user(username="magic_ceo", password="TestPassword123!", role=User.Role.CEO, company=self.company)
+        self.employee_user = User.objects.create_user(username="magic_employee", password="TestPassword123!", company=self.company)
+        self.employee = EmployeeProfile.objects.create(user=self.employee_user, branch=self.branch, department=self.department, employee_code="MAGIC-EMP")
+        self.configuration = IntegrationConfiguration.objects.create(
+            company=self.company, branch=self.branch, provider="MAGICBRICKS",
+            external_account_id="magic-account", is_enabled=True, status="CONFIGURED",
+        )
+
+    def post_magicbricks(self, payload, key="magicbricks-test-key", raw=None):
+        return self.client.post(
+            reverse("webhook-magicbricks"),
+            data=raw if raw is not None else json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_API_KEY=key,
+        )
+
+    def post_readiness(self, key="magicbricks-test-key"):
+        return self.client.post(reverse("magicbricks-readiness"), HTTP_X_API_KEY=key)
+
+    def test_readiness_authentication_is_non_creating_and_does_not_need_configuration(self):
+        self.configuration.delete()
+        response = self.post_readiness()
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data, {"status": "authenticated", "diagnostic": True})
+        self.assertEqual(Lead.objects.count(), 0)
+        self.assertEqual(IntegrationEvent.objects.count(), 0)
+
+    def test_readiness_rejects_missing_or_invalid_keys_without_side_effects(self):
+        self.assertEqual(self.client.post(reverse("magicbricks-readiness")).status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.post_readiness(key="wrong-key").status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Lead.objects.count(), 0)
+        self.assertEqual(IntegrationEvent.objects.count(), 0)
+
+    def test_api_key_and_json_validation(self):
+        payload = {"account_id": "magic-account", "phone": "9876543210"}
+        self.assertEqual(self.client.post(reverse("webhook-magicbricks"), payload, format="json").status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.post_magicbricks(payload, key="wrong-key").status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.post_magicbricks({}, raw="not-json").status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_supported_nested_payload_uses_existing_assignment_workflow(self):
+        response = self.post_magicbricks({"data": {"lead": {
+            "integrationId": "magic-account", "enquiryId": "enquiry-1",
+            "mobileNumber": "+91 98765 43210", "customerName": "Asha", "projectName": "Example Residency",
+        }}})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        lead = Lead.objects.get()
+        self.assertEqual(lead.source, "MAGICBRICKS")
+        self.assertEqual(lead.branch, self.branch)
+        # Integration intake deliberately goes through the shared lead service,
+        # which retains the established round-robin assignment behaviour.
+        self.assertEqual(lead.assigned_to, self.employee)
+        self.assertEqual(lead.source_details, "Example Residency")
+        self.assertEqual(lead.sources.get().source, "MAGICBRICKS")
+
+    def test_optional_fields_are_not_required_but_phone_is(self):
+        response = self.post_magicbricks({"account_id": "magic-account", "event_id": "minimal", "phone": "9876543210"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        response = self.post_magicbricks({"account_id": "magic-account", "event_id": "no-phone", "name": "No Phone"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["status"], "IGNORED")
+        self.assertEqual(Lead.objects.count(), 1)
+
+    def test_lead_list_source_filter_and_event_visibility_are_tenant_scoped(self):
+        self.post_magicbricks({"account_id": "magic-account", "event_id": "visible", "phone": "9876543210"})
+        self.client.force_authenticate(self.ceo)
+        response = self.client.get(reverse("lead-list"), {"source": "MAGICBRICKS"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        other_company = Company.objects.create(name="Other Magic Company")
+        other_ceo = User.objects.create_user(username="other_magic_ceo", password="TestPassword123!", role=User.Role.CEO, company=other_company)
+        self.client.force_authenticate(other_ceo)
+        self.assertEqual(self.client.get(reverse("integration-events")).data["count"], 0)
+        self.assertEqual(self.client.get(reverse("lead-list"), {"source": "MAGICBRICKS"}).data["count"], 0)
+
+    def test_disabled_mapping_and_oversized_payload_are_rejected(self):
+        self.configuration.is_enabled = False
+        self.configuration.save(update_fields=["is_enabled"])
+        response = self.post_magicbricks({"account_id": "magic-account", "phone": "9876543210"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.configuration.is_enabled = True
+        self.configuration.save(update_fields=["is_enabled"])
+        response = self.post_magicbricks({}, raw=json.dumps({"account_id": "magic-account", "padding": "x" * 600}))
+        self.assertEqual(response.status_code, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+
+    def test_duplicate_delivery_is_idempotent(self):
+        payload = {"account_id": "magic-account", "event_id": "duplicate-1", "phone": "9876543210"}
+        self.assertFalse(self.post_magicbricks(payload).data["duplicate"])
+        self.assertTrue(self.post_magicbricks(payload).data["duplicate"])
+        self.assertEqual(Lead.objects.count(), 1)
+        self.assertEqual(IntegrationEvent.objects.count(), 1)
+
+    def test_existing_recovery_state_is_preserved_when_lead_is_enriched(self):
+        lead = Lead.objects.create(
+            company=self.company, branch=self.branch, assigned_to=self.employee,
+            phone="9876543210", normalized_phone="919876543210",
+            recovery_category="NOT_INTERESTED", recovery_previous_status="NEW",
+        )
+        response = self.post_magicbricks({
+            "account_id": "magic-account", "event_id": "recovery-1",
+            "phone": "9876543210", "customerName": "Updated Name",
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        lead.refresh_from_db()
+        self.assertEqual(lead.recovery_category, "NOT_INTERESTED")
+        self.assertEqual(lead.name, "Updated Name")
+
+    def test_failure_is_durable_and_ceo_can_retry(self):
+        payload = {"account_id": "magic-account", "event_id": "retry-1", "phone": "9876543210"}
+        with patch("integrations.services.create_or_enrich_lead", side_effect=RuntimeError("temporary database failure")):
+            response = self.post_magicbricks(payload)
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        event = IntegrationEvent.objects.get()
+        self.assertEqual(event.status, "FAILED")
+        self.assertEqual(event.retry_count, 1)
+        self.configuration.refresh_from_db()
+        self.assertEqual(self.configuration.status, "ERROR")
+        self.client.force_authenticate(self.ceo)
+        response = self.client.post(reverse("integration-event-retry", args=[event.pk]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        event.refresh_from_db()
+        self.assertEqual(event.status, "PROCESSED")
+        self.assertEqual(event.retry_count, 2)
+        self.assertEqual(Lead.objects.count(), 1)
