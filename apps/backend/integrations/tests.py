@@ -238,6 +238,32 @@ class MagicbricksWebhookTests(APITestCase):
         response = self.post_magicbricks({}, raw=json.dumps({"account_id": "magic-account", "padding": "x" * 600}))
         self.assertEqual(response.status_code, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
+    def test_magicbricks_accepts_matching_account_id(self):
+        response = self.post_magicbricks({
+            "account_id": "magic-account",
+            "event_id": "matching-account",
+            "phone": "9876543210",
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(Lead.objects.count(), 1)
+
+    def test_magicbricks_accepts_different_account_id_when_single_config_exists(self):
+        response = self.post_magicbricks({
+            "account_id": "different-account",
+            "event_id": "different-account",
+            "phone": "9876543211",
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(Lead.objects.count(), 1)
+
+    def test_magicbricks_accepts_missing_account_id_when_single_config_exists(self):
+        response = self.post_magicbricks({
+            "event_id": "missing-account",
+            "phone": "9876543212",
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(Lead.objects.count(), 1)
+
     def test_duplicate_delivery_is_idempotent(self):
         payload = {"account_id": "magic-account", "event_id": "duplicate-1", "phone": "9876543210"}
         self.assertFalse(self.post_magicbricks(payload).data["duplicate"])

@@ -118,14 +118,29 @@ def normalize_payload(provider, payload):
 
 
 def _configuration(provider, account_id):
-    if not account_id:
-        raise InvalidWebhook("Webhook account identifier is missing.")
-    config = IntegrationConfiguration.objects.select_related("company", "branch").filter(
-        provider=provider, external_account_id=account_id, is_enabled=True,
-    ).first()
-    if not config:
-        raise InvalidWebhook("Webhook account is not configured.")
-    return config
+    configurations = IntegrationConfiguration.objects.select_related(
+        "company", "branch"
+    ).filter(
+        provider=provider,
+        is_enabled=True,
+    )
+
+    if account_id:
+        config = configurations.filter(
+            external_account_id=account_id
+        ).first()
+        if config:
+            return config
+
+    if provider == "MAGICBRICKS":
+        if configurations.count() == 1:
+            return configurations.first()
+
+        raise InvalidWebhook(
+            "Unable to identify the correct Magicbricks integration."
+        )
+
+    raise InvalidWebhook("Webhook account is not configured.")
 
 
 def _idempotency_key(provider, normalized, raw_body):
