@@ -133,12 +133,9 @@ def _configuration(provider, account_id):
             return config
 
     if provider == "MAGICBRICKS":
-        if configurations.count() == 1:
-            return configurations.first()
-
-        raise InvalidWebhook(
-            "Unable to identify the correct Magicbricks integration."
-        )
+        config = configurations.order_by("id").first()
+        if config:
+            return config
 
     raise InvalidWebhook("Webhook account is not configured.")
 
