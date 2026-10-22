@@ -106,6 +106,7 @@ class InventoryAPITests(APITestCase):
         self.assertEqual(records[0][0], "Export Project 5")  # model ordering is newest first
         self.assertTrue(all(row[1] != foreign_item.unit_number for row in records))
         self.assertEqual(records[0][7], 4500000)
+        self.assertEqual(build_pdf.call_args.kwargs["company_name"], self.company.name)
 
     def test_pdf_export_is_ceo_only(self):
         self.client.force_authenticate(self.manager_user)

@@ -52,6 +52,35 @@ class LeadAPITests(APITestCase):
         self.client.force_authenticate(self.ceo)
         self.assertEqual(self.client.get(reverse("lead-detail", args=[other.pk])).status_code, status.HTTP_200_OK)
 
+    def test_overview_analytics_and_site_visits_obey_lead_scope(self):
+        requested = self.create_lead(name="Requested visit", status=Lead.Status.SITE_VISIT_REQUESTED)
+        done = self.create_lead(phone="9876543211", name="Done visit", status=Lead.Status.SITE_VISIT_DONE)
+        private = self.create_lead(self.unrelated_user, phone="9876543212", name="Private visit", status=Lead.Status.SITE_VISIT_REQUESTED)
+        foreign = self.create_lead(self.other_user, phone="9876543213", name="Foreign visit", status=Lead.Status.SITE_VISIT_REQUESTED)
+        scheduled_at = timezone.now() + timedelta(days=1)
+        FollowUp.objects.create(
+            company=self.company, branch=self.branch, assigned_to=self.employee,
+            created_by=self.employee_user, lead=requested, title="Site visit",
+            follow_up_type=FollowUp.Type.SITE_VISIT, scheduled_at=scheduled_at,
+        )
+
+        self.client.force_authenticate(self.employee_user)
+        analytics = self.client.get(reverse("lead-overview-analytics"), {"days": 14})
+        self.assertEqual(analytics.status_code, status.HTTP_200_OK, analytics.data)
+        self.assertEqual(analytics.data["scope"], "personal")
+        self.assertEqual(next(row["value"] for row in analytics.data["pipeline"] if row["key"] == Lead.Status.SITE_VISIT_REQUESTED), 1)
+        requested_rows = self.client.get(reverse("site-visit-list"), {"status": "requested"})
+        self.assertEqual(requested_rows.status_code, status.HTTP_200_OK, requested_rows.data)
+        self.assertEqual([row["id"] for row in requested_rows.data["results"]], [requested.pk])
+        self.assertIsNotNone(requested_rows.data["results"][0]["site_visit_at"])
+        done_rows = self.client.get(reverse("site-visit-list"), {"status": "done"})
+        self.assertEqual([row["id"] for row in done_rows.data["results"]], [done.pk])
+
+        self.client.force_authenticate(self.ceo)
+        company_rows = self.client.get(reverse("site-visit-list"), {"status": "requested"})
+        self.assertEqual({row["id"] for row in company_rows.data["results"]}, {requested.pk, private.pk})
+        self.assertNotIn(foreign.pk, {row["id"] for row in company_rows.data["results"]})
+
     def test_cross_company_lead_and_search_are_isolated(self):
         own = self.create_lead(name="Company A")
         other = self.create_lead(self.other_user, phone="9876543210", name="Company B")

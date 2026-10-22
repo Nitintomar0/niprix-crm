@@ -1,7 +1,23 @@
 @import "leaflet/dist/leaflet.css";
 @import "tailwindcss";
 
-:root { --ink: #10233f; --ink-soft: #60708a; --canvas: #f5f8fc; --surface: #ffffff; --line: #e4eaf2; --blue: #0869d8; --blue-deep: #063a8a; --orange: #ff7a00; --success: #168460; --danger: #c43d4b; }
+:root {
+  --ink: #17233f;
+  --ink-soft: #66738d;
+  --canvas: #f8f7fc;
+  --surface: #ffffff;
+  --surface-muted: #f3f0f8;
+  --line: #e5e0ee;
+  --brand: #8661bb;
+  --brand-strong: #684496;
+  --brand-soft: #f0e9f8;
+  --lavender: #cbb3e8;
+  --navy: #17233f;
+  --mint: #15836d;
+  --peach: #c96834;
+  --danger: #bd3f58;
+  --success: #168460;
+}
 * { box-sizing: border-box; }
 html { min-height: 100%; background: var(--canvas); }
 body { min-height: 100vh; margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--font-geist), Arial, sans-serif; }
@@ -9,20 +25,68 @@ button, input { font: inherit; }
 textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
-::selection { background: #cce7ff; color: var(--ink); }
-.focus-ring:focus-visible { outline: 3px solid #8bc7ff; outline-offset: 2px; }
-.app-card { border: 1px solid var(--line); background: var(--surface); box-shadow: 0 14px 32px rgba(21, 43, 76, .055); }
-.soft-grid { background-image: linear-gradient(rgba(8, 105, 216, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(8, 105, 216, .035) 1px, transparent 1px); background-size: 36px 36px; }
-.brand-gradient { background: linear-gradient(135deg, #063a8a 0%, #087ee8 60%, #15bfe8 100%); }
-.orange-gradient { background: linear-gradient(135deg, #ffb91b 0%, #ff7a00 55%, #ef4c00 100%); }
+::selection { background: #eadff8; color: var(--ink); }
+.focus-ring:focus-visible { outline: 3px solid #cbb3e8; outline-offset: 2px; }
+.app-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 14px 32px rgba(23, 35, 63, .055);
+}
+.app-card:hover { border-color: #dcd2e9; }
+.soft-grid {
+  background-image: linear-gradient(rgba(134, 97, 187, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(134, 97, 187, .045) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+.brand-gradient { background: linear-gradient(135deg, #17233f 0%, #3c356b 48%, #8765b4 100%); }
+.orange-gradient { background: linear-gradient(135deg, #e9af86 0%, #c96834 55%, #a94d2d 100%); }
 .shimmer { background: linear-gradient(90deg, #eef2f7 25%, #f8fafc 50%, #eef2f7 75%); background-size: 200% 100%; animation: shimmer 1.45s ease-in-out infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+.page-enter { animation: page-enter .35s cubic-bezier(.2,.75,.25,1) both; }
+.card-enter { animation: card-enter .45s cubic-bezier(.2,.75,.25,1) both; }
+.card-enter:nth-child(2) { animation-delay: 55ms; }
+.card-enter:nth-child(3) { animation-delay: 110ms; }
+.card-enter:nth-child(4) { animation-delay: 165ms; }
+.brand-button {
+  background: linear-gradient(135deg, var(--brand-strong), var(--brand));
+  box-shadow: 0 10px 20px rgba(104, 68, 150, .22);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+.brand-button:hover { filter: brightness(1.04); box-shadow: 0 14px 24px rgba(104, 68, 150, .28); transform: translateY(-1px); }
+.subtle-button { transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+.subtle-button:hover { border-color: #d2c4e3; background: #faf8fc; transform: translateY(-1px); }
+.metric-value { font-variant-numeric: tabular-nums; }
+
+/* Existing operational pages share a few legacy blue utility classes. Keep
+   their semantic states but remap the visual language to the NIPRIX palette
+   while screens are progressively composed from shared primitives. */
+[class*="bg-[#0869d8]"] { background-color: var(--brand) !important; }
+[class*="text-[#0869d8]"] { color: var(--brand-strong) !important; }
+[class*="border-[#0869d8]"] { border-color: var(--brand) !important; }
+[class*="bg-[#eaf4ff]"] { background-color: var(--brand-soft) !important; }
+[class*="bg-[#f8fbff]"] { background-color: #fcfaff !important; }
+[class*="bg-[#f5faff]"] { background-color: #faf7fd !important; }
+[class*="text-[#1497f2]"] { color: #7d91bc !important; }
+[class*="bg-[#1497f2]"] { background-color: #7d91bc !important; }
+[class*="text-[#ff8a00]"] { color: #a85b3c !important; }
+[class*="bg-[#ff8a00]"] { background-color: #c9783f !important; }
+.chart-grid-line { stroke: #e9e3f0; stroke-dasharray: 3 4; }
+.chart-line-path { stroke-dasharray: 900; stroke-dashoffset: 900; animation: chart-line 1s cubic-bezier(.2,.75,.25,1) forwards; }
+.chart-bar { transform-origin: center bottom; animation: chart-rise .5s cubic-bezier(.2,.75,.25,1) both; }
+.chart-segment { transform-origin: center; animation: chart-draw .7s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes chart-line { to { stroke-dashoffset: 0; } }
+@keyframes chart-rise { from { transform: scaleY(.08); opacity: .3; } to { transform: scaleY(1); opacity: 1; } }
+@keyframes chart-draw { from { stroke-dasharray: 0 999; } }
+@keyframes page-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes card-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
 
 /* Mobile CRM primitives. Desktop remains intentionally unchanged above 1024px. */
 .mobile-bottom-nav { padding-bottom: env(safe-area-inset-bottom); height: calc(76px + env(safe-area-inset-bottom)); }
 .mobile-sheet-backdrop { background: rgba(10, 29, 53, .48); }
 .mobile-sheet { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
+.dialog-backdrop { background: rgba(34, 35, 68, .42); backdrop-filter: blur(2px); }
+.dialog-panel { animation: dialog-enter .22s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes dialog-enter { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .mobile-card-enter { animation: mobile-card-enter .24s ease-out both; }
 @keyframes mobile-card-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1023px) {

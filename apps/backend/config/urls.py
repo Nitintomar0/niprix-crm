@@ -14,6 +14,7 @@ from leads.views import (
     LeadActivityListCreateView, LeadAssignmentListView, LeadAssignView, LeadDetailView,
     LeadListCreateView, LeadMarkNotPickedView, LeadMoveToFollowUpView, LeadRecoveryListView,
     LeadRecoverySummaryView, LeadRestoreView, LeadSourceListView, LeadStatusView, LeadSummaryView, LeadTemperatureView,
+    LeadOverviewAnalyticsView, SiteVisitListView,
 )
 
 from integrations.views import (
@@ -143,6 +144,8 @@ urlpatterns = [
     path("api/inventory/bulk/", InventoryBulkCreateView.as_view(), name="inventory-bulk-create"),
     path("api/inventory/<int:pk>/", InventoryDetailView.as_view(), name="inventory-detail"),
     path("api/leads/summary/", LeadSummaryView.as_view(), name="lead-summary"),
+    path("api/leads/overview-analytics/", LeadOverviewAnalyticsView.as_view(), name="lead-overview-analytics"),
+    path("api/site-visits/", SiteVisitListView.as_view(), name="site-visit-list"),
     path("api/leads/<int:pk>/", LeadDetailView.as_view(), name="lead-detail"),
     path("api/leads/<int:pk>/mark-not-picked/", LeadMarkNotPickedView.as_view(), name="lead-mark-not-picked"),
     path("api/leads/<int:pk>/restore/", LeadRestoreView.as_view(), name="lead-restore"),

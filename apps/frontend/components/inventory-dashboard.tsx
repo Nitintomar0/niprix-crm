@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Icon } from "@/components/icons";
+import { AppDialog } from "@/components/app-dialog";
 import { api } from "@/lib/api";
 import type { InventoryItem, InventoryStatus, InventorySummary, Role } from "@/lib/types";
 
@@ -23,14 +24,7 @@ function inventoryQuery(filters: { page: number; search: string; status: string;
 }
 
 function Dialog({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
-  return <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-    <button aria-label="Close" onClick={close} className="mobile-sheet-backdrop absolute inset-0" />
-    <div className="mobile-sheet relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-t-[24px] bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6">
-      <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#d8e1ec] sm:hidden" />
-      <div className="flex items-center justify-between gap-4"><h2 className="text-xl font-semibold text-[#203756]">{title}</h2><button onClick={close} aria-label="Close" className="focus-ring flex h-10 w-10 items-center justify-center rounded-xl text-xl text-[#60708a]">×</button></div>
-      {children}
-    </div>
-  </div>;
+  return <AppDialog title={title} close={close} maxWidth="max-w-5xl">{children}</AppDialog>;
 }
 
 function InventoryBadge({ value }: { value: InventoryStatus }) {

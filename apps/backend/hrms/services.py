@@ -89,6 +89,7 @@ def hr_dashboard(*, actor):
     from attendance.models import AttendanceRecord
     from core.models import AuditLog
     from leads.models import Lead
+    from workspace.models import Task
     from .models import EmployeeDocument, Holiday
 
     if actor.role == "EMPLOYEE" and not actor.is_superuser:
@@ -191,6 +192,13 @@ def hr_dashboard(*, actor):
             "follow_ups_completed": profile.follow_ups_completed,
             "conversion_rate": conversion,
         })
+    task_status_rows = Task.objects.filter(
+        company=company, assigned_to_id__in=active_ids,
+    ).values("status").annotate(value=Count("id")).order_by("status")
+    task_status_distribution = [
+        {"label": Task.Status(row["status"]).label, "value": row["value"]}
+        for row in task_status_rows
+    ]
     return {
         "scope": "company" if actor.role == "CEO" or actor.is_superuser else "team",
         "kpis": {
@@ -208,4 +216,5 @@ def hr_dashboard(*, actor):
         "activity": [{"id": item.pk, "action": item.action, "actor": item.actor.username if item.actor else "System", "created_at": item.created_at, "reason": item.reason} for item in activity],
         "workforce_activity": workforce_activity,
         "performance": {"leaderboard": leaderboard},
+        "tasks": {"status_distribution": task_status_distribution},
     }

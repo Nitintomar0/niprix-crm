@@ -16,6 +16,8 @@ import {
   type LeadAssignment,
   type LeadSource,
   type LeadSummary,
+  type LeadOverviewAnalytics,
+  type SiteVisit,
   type LeadRecoverySummary,
   type RecoveryLead,
   type IntegrationConfiguration,
@@ -77,8 +79,8 @@ function invalidatePaths(prefixes: string[]) {
 
 function invalidateForMutation(path: string) {
   if (path.startsWith("/api/inventory/")) return invalidatePaths(["/api/inventory/"]);
-  if (path.startsWith("/api/leads/")) return invalidatePaths(["/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
-  if (path.startsWith("/api/follow-ups/") || path.startsWith("/api/tasks/")) return invalidatePaths(["/api/follow-ups/", "/api/tasks/", "/api/workspace/summary/", "/api/leads/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/leads/")) return invalidatePaths(["/api/leads/", "/api/site-visits/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/follow-ups/") || path.startsWith("/api/tasks/")) return invalidatePaths(["/api/follow-ups/", "/api/tasks/", "/api/site-visits/", "/api/workspace/summary/", "/api/leads/", "/api/employees/", "/api/notifications/"]);
   if (path.startsWith("/api/raw-data/")) return invalidatePaths(["/api/raw-data/", "/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
   if (path.startsWith("/api/attendance/")) return invalidatePaths(["/api/attendance/", "/api/employees/", "/api/hrms/dashboard/"]);
   if (path.startsWith("/api/employees/")) return invalidatePaths(["/api/employees/", "/api/hrms/", "/api/attendance/", "/api/leads/", "/api/workspace/"]);
@@ -327,6 +329,7 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
 
 
 
+
 export function preloadSalesSectionData(role: string) {
   const requests: Promise<unknown>[] = [
     api.leads("page=1&page_size=25"),
@@ -334,6 +337,7 @@ export function preloadSalesSectionData(role: string) {
     api.followUps("page=1&page_size=20"),
     api.workspaceSummary(),
     api.employees(),
+    api.hrDashboard(),
   ];
 
   if (role !== "EMPLOYEE") {
@@ -345,6 +349,7 @@ export function preloadSalesSectionData(role: string) {
 
   void Promise.allSettled(requests);
 }
+
 
 
 
@@ -412,6 +417,7 @@ export const api = {
   createHoliday: (body: { name: string; holiday_date: string; description?: string }) => request<import("@/lib/types").Holiday>("/api/hrms/holidays/", { method: "POST", body: JSON.stringify(body) }),
   deleteHoliday: (id: number) => request<void>(`/api/hrms/holidays/${id}/`, { method: "DELETE" }),
   hrDashboard: () => cachedGet<import("@/lib/types").HRDashboard>("/api/hrms/dashboard/"),
+  peekHRDashboard: () => peekCached<import("@/lib/types").HRDashboard>("/api/hrms/dashboard/"),
   employeeDocuments: () => cachedGet<import("@/lib/types").EmployeeDocument[]>("/api/hrms/documents/"),
   uploadEmployeeDocument: (employeeId: number, body: FormData) => request<import("@/lib/types").EmployeeDocument>(`/api/hrms/employees/${employeeId}/documents/`, { method: "POST", body }),
   async downloadEmployeeDocument(id: number) {
@@ -450,6 +456,8 @@ primeLeadFromList: (lead: Lead) => primeLeadFromList(lead),
   lead: (id: number) => cachedGet<Lead>(`/api/leads/${id}/`),
   leadSummary: () => cachedGet<LeadSummary>("/api/leads/summary/", 10_000),
   peekLeadSummary: () => peekCached<LeadSummary>("/api/leads/summary/"),
+  leadOverviewAnalytics: (days = 14) => cachedGet<LeadOverviewAnalytics>(`/api/leads/overview-analytics/?days=${days}`, 15_000),
+  siteVisits: (query = "") => cachedGet<Paginated<SiteVisit>>(`/api/site-visits/?${query}`, 10_000),
   createLead: (body: Record<string, unknown>) => request<Lead>("/api/leads/", { method: "POST", body: JSON.stringify(body) }),
   updateLead: (id: number, body: Record<string, unknown>) => request<Lead>(`/api/leads/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   assignLead: (id: number, assigned_to: number, note = "") => request<Lead>(`/api/leads/${id}/assign/`, { method: "POST", body: JSON.stringify({ assigned_to, note }) }),

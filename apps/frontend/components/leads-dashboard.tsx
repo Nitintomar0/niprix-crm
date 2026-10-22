@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Icon } from "@/components/icons";
+import { AppDialog } from "@/components/app-dialog";
 import { LeadBadge as Badge } from "@/components/lead-badge";
 import type {
   EmployeeOption,
@@ -67,6 +68,7 @@ const money = (value?: string | null) =>
     : "Not provided";
 const resultRows = <T,>(value: { results: T[] } | T[]) =>
   Array.isArray(value) ? value : value.results;
+const Dialog = AppDialog;
 const dateValue = (date: Date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
@@ -85,43 +87,6 @@ function Card({ title, value }: { title: string; value: number }) {
         {title.toUpperCase()}
       </p>
       <p className="mt-2 text-2xl font-semibold text-[#203756]">{value}</p>
-    </div>
-  );
-}
-function Dialog({
-  title,
-  close,
-  children,
-}: {
-  title: string;
-  close: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
-    >
-      <button
-        aria-label="Close"
-        onClick={close}
-        className="mobile-sheet-backdrop absolute inset-0"
-      />
-      <div className="mobile-sheet relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[24px] bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-6">
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#d8e1ec] sm:hidden" />
-        <div className="flex justify-between gap-3">
-          <h2 className="text-xl font-semibold text-[#203756]">{title}</h2>
-          <button
-            aria-label="Close"
-            onClick={close}
-            className="focus-ring text-xl text-[#60708a]"
-          >
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }
@@ -651,7 +616,7 @@ onClick={() => {
         </div>
       </div>
       {creating && (
-        <Dialog title="Create manual lead" close={() => setCreating(false)}>
+        <AppDialog title="Create manual lead" close={() => setCreating(false)}>
           <form onSubmit={create} className="mt-5 grid gap-4 sm:grid-cols-2">
             <Input name="phone" label="Phone" required />
             <Input name="name" label="Name" />
@@ -683,9 +648,9 @@ onClick={() => {
               </button>
             </div>
           </form>
-        </Dialog>
+        </AppDialog>
       )}
-      {filtersOpen && <Dialog title="Filter leads" close={() => setFiltersOpen(false)}><div className="mt-4 space-y-3">{filterControls("grid gap-3")}</div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={resetFilters} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></Dialog>}
+      {filtersOpen && <AppDialog title="Filter leads" close={() => setFiltersOpen(false)}><div className="mt-4 space-y-3">{filterControls("grid gap-3")}</div><div className="mt-5 grid grid-cols-2 gap-3"><button onClick={resetFilters} className="focus-ring rounded-xl border border-[#dce4ee] px-4 py-2.5 text-sm font-bold text-[#405773]">Reset</button><button onClick={() => setFiltersOpen(false)} className="focus-ring rounded-xl bg-[#0869d8] px-4 py-2.5 text-sm font-bold text-white">Apply filters</button></div></AppDialog>}
     </section>
   );
 }

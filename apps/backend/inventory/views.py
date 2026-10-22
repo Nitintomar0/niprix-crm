@@ -183,7 +183,7 @@ class InventoryPDFExportView(APIView):
             "landing",
             "booking_date",
         )
-        pdf = build_inventory_pdf(records)
+        pdf = build_inventory_pdf(records, company_name=request.user.company.name)
         timestamp = timezone.localtime(timezone.now()).strftime("%Y%m%d-%H%M%S")
         response = HttpResponse(pdf, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="niprix-inventory-{timestamp}.pdf"'

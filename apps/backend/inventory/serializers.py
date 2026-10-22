@@ -12,7 +12,9 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     def get_fields(self):
         fields = super().get_fields()
         request = self.context.get("request")
-        if not request or not (request.user.is_superuser or request.user.role == "CEO"):
+        if not request or not request.user.is_authenticated or not (
+    request.user.is_superuser or request.user.role == "CEO"
+):
             fields.pop("landing", None)
         return fields
 

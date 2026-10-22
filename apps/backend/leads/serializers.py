@@ -91,6 +91,23 @@ class LeadSerializer(serializers.ModelSerializer):
         return update_lead(actor=self.context["request"].user, lead=instance, data=validated_data)
 
 
+class SiteVisitSerializer(serializers.ModelSerializer):
+    """A compact, read-only lead projection for the Site Visits workspace."""
+
+    assigned_to_detail = EmployeeReferenceSerializer(source="assigned_to", read_only=True)
+    site_visit_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    site_visit_follow_up_id = serializers.IntegerField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = Lead
+        fields = (
+            "id", "name", "phone", "property_type", "preferred_location", "requirement_notes",
+            "status", "assigned_to", "assigned_to_detail", "site_visit_at", "site_visit_follow_up_id",
+            "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+
 class LeadRecoverySerializer(LeadSerializer):
     """Recovery rows retain the normal Lead payload plus their latest context."""
 

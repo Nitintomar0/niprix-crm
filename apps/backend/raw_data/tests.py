@@ -53,6 +53,19 @@ class RawDataAPITests(APITestCase):
         duplicate = self.client.post(reverse("raw-lead-list"), {"phone": "9876543210"}, format="json")
         self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_budget_is_optional_and_transfers_when_populated(self):
+        self.client.force_authenticate(self.ceo)
+        empty = self.client.post(reverse("raw-lead-list"), {"name": "No budget", "phone": "9876543211"}, format="json")
+        self.assertEqual(empty.status_code, status.HTTP_201_CREATED, empty.data)
+        self.assertIsNone(empty.data["budget_maximum"])
+        populated = self.client.post(reverse("raw-lead-list"), {"name": "Budget lead", "phone": "9876543212", "budget_maximum": "12500000"}, format="json")
+        self.assertEqual(populated.status_code, status.HTTP_201_CREATED, populated.data)
+        self.assertEqual(populated.data["budget_maximum"], "12500000.00")
+        raw = RawLead.objects.get(pk=populated.data["id"])
+        response = self.post_distribution({"raw_lead_ids": [raw.pk], "employee_ids": [self.employee.pk], "mode": "SPECIFIC"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(Lead.objects.get(normalized_phone=raw.normalized_phone).budget_maximum, raw.budget_maximum)
+
     def test_preview_is_stateless_and_detects_invalid_and_duplicate_rows(self):
         self.client.force_authenticate(self.ceo)
         response = self.client.post(reverse("raw-data-preview"), {"rows": [

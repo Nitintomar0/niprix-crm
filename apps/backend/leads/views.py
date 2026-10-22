@@ -1,7 +1,7 @@
 from datetime import date
 import logging
 
-from django.db.models import Prefetch, Q
+from django.db.models import OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -14,8 +14,10 @@ from .models import Lead, LeadActivity, LeadAssignment, LeadSource
 from .serializers import (
     LeadActivitySerializer, LeadAssignmentSerializer, LeadNoteSerializer, LeadReassignSerializer,
     LeadMoveToFollowUpSerializer, LeadRecoveryActionSerializer, LeadRecoverySerializer, LeadSerializer,
-    LeadSourceSerializer, LeadStatusSerializer, LeadTemperatureSerializer,
+    LeadSourceSerializer, LeadStatusSerializer, LeadTemperatureSerializer, SiteVisitSerializer,
 )
+from .analytics import overview_analytics
+from workspace.models import FollowUp
 from .services import (
     add_note, company_for, delete_lead, lead_queryset, mark_lead_recovery,
     move_lead_to_follow_up, reassign_lead, restore_lead_from_recovery, update_lead,
@@ -303,3 +305,60 @@ class LeadSummaryView(APIView):
             "site_visits": queryset.filter(status__in=[Lead.Status.SITE_VISIT_REQUESTED, Lead.Status.SITE_VISIT_DONE]).count(),
             "closed": queryset.filter(status=Lead.Status.CLOSED).count(),
         })
+
+
+class LeadOverviewAnalyticsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw_days = request.query_params.get("days", "14")
+        try:
+            days = int(raw_days)
+        except ValueError:
+            raise ValidationError({"days": "Must be an integer between 7 and 90."})
+        if not 7 <= days <= 90:
+            raise ValidationError({"days": "Must be between 7 and 90."})
+        return Response(overview_analytics(request.user, days=days))
+
+
+class SiteVisitListView(ScopedLeadListMixin, generics.ListAPIView):
+    """Use Lead as the source of truth; no duplicate Site Visit customer rows."""
+
+    serializer_class = SiteVisitSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        kind = self.request.query_params.get("status", "requested")
+        statuses = {
+            "requested": [Lead.Status.SITE_VISIT_REQUESTED],
+            "done": [Lead.Status.SITE_VISIT_DONE],
+            "all": [Lead.Status.SITE_VISIT_REQUESTED, Lead.Status.SITE_VISIT_DONE],
+        }
+        if kind not in statuses:
+            raise ValidationError({"status": "Choose requested, done, or all."})
+        latest_site_visit = FollowUp.objects.filter(
+            lead_id=OuterRef("pk"), follow_up_type=FollowUp.Type.SITE_VISIT,
+        ).order_by("-scheduled_at", "-pk")
+        queryset = lead_queryset(self.request.user).filter(
+            recovery_category__isnull=True, status__in=statuses[kind],
+        ).annotate(
+            site_visit_at=Subquery(latest_site_visit.values("scheduled_at")[:1]),
+            site_visit_follow_up_id=Subquery(latest_site_visit.values("pk")[:1]),
+        )
+        search = self.request.query_params.get("search", "").strip()
+        if len(search) > 200:
+            raise ValidationError({"search": "Must be 200 characters or fewer."})
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(phone__icontains=search) |
+                Q(preferred_location__icontains=search) | Q(property_type__icontains=search)
+            )
+        if self.request.query_params.get("assigned_to"):
+            try:
+                employee_id = int(self.request.query_params["assigned_to"])
+            except ValueError:
+                raise ValidationError({"assigned_to": "Must be a positive integer."})
+            if employee_id <= 0:
+                raise ValidationError({"assigned_to": "Must be a positive integer."})
+            queryset = queryset.filter(assigned_to_id=employee_id)
+        return queryset.order_by("site_visit_at", "-updated_at", "-id")
