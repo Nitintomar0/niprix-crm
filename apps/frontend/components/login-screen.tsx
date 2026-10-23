@@ -4,6 +4,7 @@ import Image from "next/image";
 import { FormEvent, useState } from "react";
 import { FullLogo } from "@/components/brand";
 import { Icon } from "@/components/icons";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 function PartnerBranding({ compact = false }: { compact?: boolean }) {
   return (
@@ -27,7 +28,8 @@ export function LoginScreen({ onSubmit, error }: { onSubmit: (username: string, 
   }
 
   return (
-    <main className="soft-grid min-h-screen bg-[#f8f7fc] p-4 sm:p-7 lg:p-8">
+    <main className="soft-grid relative min-h-screen bg-[#f8f7fc] p-4 sm:p-7 lg:p-8">
+      <div className="absolute right-5 top-5 z-10 sm:right-8 sm:top-8"><ThemeToggle /></div>
       <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-6xl overflow-hidden rounded-[32px] border border-[#e3ddeb] bg-white shadow-[0_28px_90px_rgba(23,35,63,.14)] lg:grid-cols-[1.08fr_.92fr]">
         <section className="brand-gradient relative hidden overflow-hidden p-12 text-white lg:flex lg:flex-col">
           <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full border border-white/15" />

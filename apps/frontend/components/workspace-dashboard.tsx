@@ -71,15 +71,15 @@ function label(value: string) {
 function badge(value: string) {
   const tone =
     value === "COMPLETED"
-      ? "bg-[#e9f6f1] text-[#168460]"
+      ? "success"
       : value === "URGENT" || value === "HIGH" || value === "MISSED"
-        ? "bg-[#fff0f1] text-[#b12938]"
+        ? "danger"
         : value === "POSTPONED" || value === "BLOCKED"
-          ? "bg-[#fff4e5] text-[#a96908]"
-          : "bg-[#eaf4ff] text-[#0869d8]";
+          ? "warning"
+          : "info";
   return (
     <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}
+      className={`status-badge status-badge--${tone} inline-flex rounded-full px-2.5 py-1 text-xs font-semibold`}
     >
       {label(value)}
     </span>

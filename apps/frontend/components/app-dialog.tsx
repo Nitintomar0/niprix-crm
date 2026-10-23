@@ -27,8 +27,10 @@ export function AppDialog({ title, close, children, maxWidth = "max-w-2xl" }: Ap
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-  setMounted(true);
-}, []);
+    // Delay portal creation by one frame so the server and hydration pass agree.
+    const frame = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     closeRef.current = close;
@@ -87,16 +89,16 @@ export function AppDialog({ title, close, children, maxWidth = "max-w-2xl" }: Ap
         ref={panelRef}
         tabIndex={-1}
         onKeyDown={containFocus}
-        className={`dialog-panel relative z-[101] my-auto flex max-h-[calc(100dvh-6rem)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-[0_28px_80px_rgba(34,35,68,.26)] sm:max-h-[calc(100dvh-2.5rem)] ${maxWidth}`}
+        className={`app-dialog-panel dialog-panel relative z-[101] my-auto flex max-h-[calc(100dvh-6rem)] w-full flex-col overflow-hidden rounded-2xl sm:max-h-[calc(100dvh-2.5rem)] ${maxWidth}`}
       >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-[#eee8f4] bg-white px-5 py-4 sm:px-6">
+        <header className="app-dialog-header flex shrink-0 items-center justify-between gap-4 border-b px-5 py-4 sm:px-6">
           <div className="min-w-0">
-            <p className="text-[10px] font-bold tracking-[.15em] text-[#805bab]">
+            <p className="page-kicker text-[10px] font-bold tracking-[.15em]">
               NIPRIX CRM
             </p>
             <h2
               id={titleId}
-              className="mt-0.5 truncate text-xl font-bold tracking-tight text-[#222344]"
+              className="page-title mt-0.5 truncate text-xl font-bold tracking-tight"
             >
               {title}
             </h2>
@@ -106,7 +108,7 @@ export function AppDialog({ title, close, children, maxWidth = "max-w-2xl" }: Ap
             type="button"
             onClick={close}
             aria-label={`Close ${title}`}
-            className="focus-ring flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#69708a] transition hover:bg-[#f4eff9] hover:text-[#684496]"
+            className="app-dialog-close focus-ring flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition"
           >
             <Icon name="close" className="h-5 w-5" />
           </button>

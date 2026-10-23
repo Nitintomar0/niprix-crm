@@ -130,24 +130,24 @@ export function NotificationCenter() {
           setIsOpen(next);
           if (next) void load();
         }}
-        className="focus-ring relative flex h-10 w-10 items-center justify-center rounded-xl border border-transparent text-[#526984] transition hover:border-[#e0e8f1] hover:bg-[#f5f8fc] hover:text-[#0869d8]"
+        className="notification-trigger focus-ring relative flex h-10 w-10 items-center justify-center rounded-xl border border-transparent transition"
       >
         <Icon name="bell" className="h-[19px] w-[19px]" />
-        {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-[#ff8a00] px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+        {unreadCount > 0 && <span className="notification-badge absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 px-1 text-[10px] font-bold">{unreadCount > 99 ? "99+" : unreadCount}</span>}
       </button>
       {isOpen && (
-        <section role="dialog" aria-label="Notifications" className="absolute right-0 top-[calc(100%+10px)] z-50 w-[min(390px,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-[#e1e9f2] bg-white shadow-[0_20px_48px_rgba(16,35,63,.16)]">
-          <header className="flex items-center justify-between border-b border-[#edf1f6] px-5 py-4">
-            <div><h2 className="text-sm font-bold text-[#10233f]">Notifications</h2><p className="mt-0.5 text-xs text-[#718198]">Your company workspace updates</p></div>
-            <button type="button" disabled={!unreadCount || updating} onClick={() => void markAllRead()} className="focus-ring text-xs font-bold text-[#0869d8] disabled:text-[#a6b3c3]">{updating ? "Saving…" : "Mark all read"}</button>
+        <section role="dialog" aria-label="Notifications" className="notification-panel absolute right-0 top-[calc(100%+10px)] z-50 w-[min(390px,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border">
+          <header className="notification-panel__header flex items-center justify-between border-b px-5 py-4">
+            <div><h2 className="notification-panel__title text-sm font-bold">Notifications</h2><p className="notification-panel__copy mt-0.5 text-xs">Your company workspace updates</p></div>
+            <button type="button" disabled={!unreadCount || updating} onClick={() => void markAllRead()} className="notification-panel__action focus-ring text-xs font-bold">{updating ? "Saving…" : "Mark all read"}</button>
           </header>
           <div className="max-h-[420px] overflow-y-auto">
             {loading && <div className="space-y-3 p-5"><div className="shimmer h-16 rounded-xl" /><div className="shimmer h-16 rounded-xl" /><div className="shimmer h-16 rounded-xl" /></div>}
-            {!loading && error && <div className="p-5"><p className="rounded-xl bg-[#fff5f5] p-3 text-sm text-[#a72536]">{error}</p><button type="button" onClick={() => void load()} className="focus-ring mt-3 text-sm font-bold text-[#0869d8]">Try again</button></div>}
-            {!loading && !error && !items.length && <div className="p-9 text-center"><span className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eaf4ff] text-[#0869d8]"><Icon name="bell" className="h-5 w-5" /></span><p className="mt-3 text-sm font-bold text-[#253a59]">You&apos;re all caught up</p><p className="mt-1 text-xs leading-5 text-[#718198]">New assignments and workspace updates will appear here.</p></div>}
-            {!loading && !error && items.map((item) => <button type="button" key={item.id} onClick={() => void openNotification(item)} className={`focus-ring flex w-full gap-3 border-b border-[#f0f3f7] px-5 py-4 text-left transition hover:bg-[#f8fbff] ${item.is_read ? "" : "bg-[#f1f7ff]"}`}>
-              <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${item.is_read ? "bg-[#f0f4f8] text-[#718198]" : "bg-[#dceeff] text-[#0869d8]"}`}>{symbols[item.notification_type]}</span>
-              <span className="min-w-0 flex-1"><span className="flex items-start justify-between gap-3"><strong className="text-sm text-[#253a59]">{item.title}</strong>{!item.is_read && <i className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#0869d8]" />}</span><span className="mt-1 block text-xs leading-5 text-[#60708a]">{item.body}</span><time className="mt-1.5 block text-[11px] font-medium text-[#8a98aa]">{relativeTime(item.created_at)}</time></span>
+            {!loading && error && <div className="p-5"><p className="notification-panel__error rounded-xl p-3 text-sm">{error}</p><button type="button" onClick={() => void load()} className="notification-panel__action focus-ring mt-3 text-sm font-bold">Try again</button></div>}
+            {!loading && !error && !items.length && <div className="p-9 text-center"><span className="notification-panel__empty-icon mx-auto flex h-11 w-11 items-center justify-center rounded-2xl"><Icon name="bell" className="h-5 w-5" /></span><p className="notification-panel__title mt-3 text-sm font-bold">You&apos;re all caught up</p><p className="notification-panel__copy mt-1 text-xs leading-5">New assignments and workspace updates will appear here.</p></div>}
+            {!loading && !error && items.map((item) => <button type="button" key={item.id} onClick={() => void openNotification(item)} className={`notification-item focus-ring flex w-full gap-3 border-b px-5 py-4 text-left transition ${item.is_read ? "" : "notification-item--unread"}`}>
+              <span className="notification-item__symbol mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm font-bold">{symbols[item.notification_type]}</span>
+              <span className="min-w-0 flex-1"><span className="flex items-start justify-between gap-3"><strong className="notification-item__title text-sm">{item.title}</strong>{!item.is_read && <i className="notification-item__dot mt-1.5 h-2 w-2 shrink-0 rounded-full" />}</span><span className="notification-panel__copy mt-1 block text-xs leading-5">{item.body}</span><time className="notification-panel__time mt-1.5 block text-[11px] font-medium">{relativeTime(item.created_at)}</time></span>
             </button>)}
           </div>
         </section>

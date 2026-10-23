@@ -3,8 +3,6 @@
 import dynamic from "next/dynamic";
 import { Overview } from "@/components/overview";
 import { useNiprixAuth } from "@/components/niprix-auth-provider";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 function PageSectionLoader() {
   return <div aria-label="Loading section" className="space-y-4"><div className="shimmer h-12 rounded-2xl" /><div className="shimmer h-64 rounded-2xl" /></div>;

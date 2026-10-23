@@ -28,8 +28,8 @@ function Dialog({ title, close, children }: { title: string; close: () => void; 
 }
 
 function InventoryBadge({ value }: { value: InventoryStatus }) {
-  const tone = value === "AVAILABLE" ? "bg-[#e9f6f1] text-[#168460]" : value === "SOLD" || value === "BOOKED" ? "bg-[#eaf4ff] text-[#0869d8]" : value === "HOLD" || value === "RESERVED" ? "bg-[#fff4e5] text-[#a96908]" : "bg-[#fff0f1] text-[#b12938]";
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${tone}`}>{label(value)}</span>;
+  const tone = value === "AVAILABLE" ? "success" : value === "SOLD" || value === "BOOKED" ? "info" : value === "HOLD" || value === "RESERVED" ? "warning" : "danger";
+  return <span className={`status-badge status-badge--${tone} inline-flex rounded-full px-2.5 py-1 text-xs font-bold`}>{label(value)}</span>;
 }
 
 export function InventoryDashboard({ role }: { role: Role }) {

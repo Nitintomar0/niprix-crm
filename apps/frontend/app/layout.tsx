@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { NiprixAuthProvider } from "@/components/niprix-auth-provider";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist", subsets: ["latin"] });
@@ -12,5 +13,6 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  return <html lang="en" className={geist.variable}><body><NiprixAuthProvider>{children}</NiprixAuthProvider></body></html>;
+  const themeBootScript = `(() => { try { const saved = localStorage.getItem('niprix-theme'); const theme = saved === 'day' || saved === 'night' ? saved : (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day'); document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme === 'night' ? 'dark' : 'light'; } catch (_) {} })();`;
+  return <html lang="en" className={geist.variable} suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: themeBootScript }} /></head><body><ThemeProvider><NiprixAuthProvider>{children}</NiprixAuthProvider></ThemeProvider></body></html>;
 }
