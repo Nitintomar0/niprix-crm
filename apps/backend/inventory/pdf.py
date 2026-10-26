@@ -44,11 +44,25 @@ def _text(value: object) -> str:
 def _currency(value: object) -> str:
     if value in (None, ""):
         return "-"
+
     try:
         amount = Decimal(str(value))
     except Exception:
         return _text(value)
-    return "INR {:,.0f}".format(amount)
+
+    absolute = abs(amount)
+
+    if absolute >= Decimal("10000000"):
+        crore = amount / Decimal("10000000")
+        formatted = f"{crore:.2f}".rstrip("0").rstrip(".")
+        return f"Rs. {formatted} Cr"
+
+    if absolute >= Decimal("100000"):
+        lakh = amount / Decimal("100000")
+        formatted = f"{lakh:.2f}".rstrip("0").rstrip(".")
+        return f"Rs. {formatted} Lakh"
+
+    return "Rs. {:,.0f}".format(amount)
 
 
 def _date(value: object) -> str:
