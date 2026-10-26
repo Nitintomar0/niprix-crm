@@ -893,7 +893,7 @@ const [lead, setLead] = useState<Lead | null>(() => api.peekLead(id) ?? null);
     );
   return (
     <section className="space-y-5 sm:space-y-6">
-      <div className="rounded-2xl border border-[#dfe8f3] bg-[linear-gradient(135deg,#ffffff_0%,#f2f8ff_100%)] p-4 shadow-[0_12px_30px_rgba(22,55,94,.06)] sm:p-5">
+      <div className="lead-detail-header rounded-2xl border p-4 shadow-[0_12px_30px_rgba(22,55,94,.06)] sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Link href="/leads" className="focus-ring inline-flex items-center gap-1 text-sm font-bold text-[#0869d8]">

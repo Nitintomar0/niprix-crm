@@ -8,7 +8,61 @@ import type { InventoryItem, InventoryStatus, InventorySummary, Role } from "@/l
 
 const statuses: InventoryStatus[] = ["AVAILABLE", "HOLD", "BOOKED", "SOLD", "BLOCKED", "RESERVED"];
 const label = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
-const money = (value: string) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value));
+
+const money = (value: string | number) => {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) return "—";
+
+  const absolute = Math.abs(amount);
+
+  if (absolute >= 10_000_000) {
+    const crore = amount / 10_000_000;
+    return `₹${Number(crore.toFixed(2))} Cr`;
+  }
+
+  if (absolute >= 100_000) {
+    const lakh = amount / 100_000;
+    return `₹${Number(lakh.toFixed(2))} Lakh`;
+  }
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+function parseMoneyInput(value: string): number | null {
+  const normalized = value.trim().toLowerCase().replace(/[₹,\s]/g, "");
+
+  if (!normalized) return null;
+
+  const match = normalized.match(
+    /^(\d+(?:\.\d+)?)(lakh|lac|crore|cr|l|c)?$/
+  );
+
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const suffix = match[2];
+
+  const multiplier =
+    suffix === "lakh" || suffix === "lac" || suffix === "l"
+      ? 100_000
+      : suffix === "crore" || suffix === "cr" || suffix === "c"
+        ? 10_000_000
+        : 1;
+
+  const result = amount * multiplier;
+
+  if (!Number.isFinite(result) || result < 0 || result > Number.MAX_SAFE_INTEGER) {
+    return null;
+  }
+
+  return Math.round(result);
+}
+
 const blankRow = () => ({ project: "", unit_number: "", property_type: "", size_sqft: "", floor: "", basic_price: "", status: "AVAILABLE" as InventoryStatus, booking_date: "", landing: "" });
 type InventoryRow = ReturnType<typeof blankRow>;
 
@@ -94,9 +148,44 @@ export function InventoryDashboard({ role }: { role: Role }) {
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string, string>;
-    if (!data.booking_date) delete data.booking_date;
-    if (!ceo) delete data.landing;
+    
+const data = Object.fromEntries(
+  new FormData(event.currentTarget).entries()
+) as Record<string, string>;
+
+const basicPrice = parseMoneyInput(data.basic_price ?? "");
+
+if (basicPrice === null) {
+  setError(
+    "Basic price is required or invalid. Use formats like 34 lakh or 2.5 cr."
+  );
+  return;
+}
+
+data.basic_price = String(basicPrice);
+
+if (ceo) {
+  const landingInput = (data.landing ?? "").trim();
+
+  if (landingInput) {
+    const landingPrice = parseMoneyInput(landingInput);
+
+    if (landingPrice === null) {
+      setError(
+        "Landing price is invalid. Use formats like 25 lakh or 2 cr."
+      );
+      return;
+    }
+
+    data.landing = String(landingPrice);
+  } else {
+    delete data.landing;
+  }
+}
+
+if (!data.booking_date) delete data.booking_date;
+if (!ceo) delete data.landing;
+
     try {
       if (form?.id) await api.updateInventory(form.id, data);
       else await api.createInventory(data);
@@ -110,7 +199,27 @@ export function InventoryDashboard({ role }: { role: Role }) {
   async function submitBulk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const clean = rows.map(({ landing, booking_date, ...row }) => ({ ...row, ...(booking_date ? { booking_date } : {}), ...(ceo && landing ? { landing } : {}) }));
+      
+const clean = rows.map(({ landing, booking_date, ...row }, index) => {
+  const basicPrice = parseMoneyInput(row.basic_price);
+  const landingPrice = landing.trim() ? parseMoneyInput(landing) : null;
+
+  if (basicPrice === null) {
+    throw new Error(`Item ${index + 1}: Enter a valid basic price, e.g. 34 lakh or 2.5 cr.`);
+  }
+
+  if (ceo && landing.trim() && landingPrice === null) {
+    throw new Error(`Item ${index + 1}: Enter a valid landing amount, e.g. 25 lakh or 2 cr.`);
+  }
+
+  return {
+    ...row,
+    basic_price: String(basicPrice),
+    ...(booking_date ? { booking_date } : {}),
+    ...(ceo && landingPrice !== null ? { landing: String(landingPrice) } : {}),
+  };
+});
+
       await api.bulkCreateInventory(clean);
       setBulk(false);
       setRows([blankRow()]);
@@ -158,7 +267,7 @@ export function InventoryDashboard({ role }: { role: Role }) {
   return <section className="space-y-5 sm:space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm text-[#60708a]">Company inventory</p><h1 className="mt-1 text-[24px] font-semibold tracking-tight text-[#203756]">Inventory</h1></div><div className="flex flex-wrap gap-2">{ceo && <button type="button" onClick={() => void exportPdf()} disabled={exporting} aria-busy={exporting} title="Download every inventory record you are authorized to access. Current table filters are not applied." className="focus-ring min-h-11 rounded-xl border border-[#0869d8] px-3 py-2.5 text-sm font-bold text-[#0869d8] disabled:cursor-wait disabled:opacity-60 sm:px-4">{exporting ? "Preparing PDF…" : "Download Inventory PDF"}</button>}{role !== "EMPLOYEE" && <><button onClick={() => setBulk(true)} className="focus-ring min-h-11 rounded-xl border border-[#0869d8] px-3 py-2.5 text-sm font-bold text-[#0869d8] sm:px-4">Bulk add</button><button onClick={() => setForm({} as InventoryItem)} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0869d8] px-3 py-2.5 text-sm font-bold text-white shadow-[0_8px_16px_rgba(8,105,216,.18)] sm:px-4"><Icon name="plus" className="h-4 w-4" />Add</button></>}</div></div>
     <div className="grid grid-cols-2 gap-3 md:grid-cols-5">{cards.map(([name, value]) => <div key={String(name)} className="app-card rounded-2xl p-4"><p className="text-xs font-semibold uppercase tracking-[.07em] text-[#75869b]">{name}</p><p className="mt-2 text-2xl font-semibold text-[#203756]">{value ?? "—"}</p></div>)}</div>
-    {ceo && summary?.landing_total !== undefined && <p className="text-sm text-[#60708a]">Total landing: <strong className="text-[#203756]">{money(summary.landing_total)}</strong></p>}
+    
     <div className="app-card rounded-2xl p-3 sm:p-5">
       <div className="flex gap-2 md:hidden"><label className="relative min-w-0 flex-1"><span className="sr-only">Search inventory</span><Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#75869b]" /><input value={search} onChange={filtersChanged(setSearch)} placeholder="Search inventory" className="focus-ring w-full rounded-xl border border-[#dce4ee] py-2.5 pl-9 pr-3 text-sm" /></label><button onClick={() => setFiltersOpen(true)} className="focus-ring relative inline-flex min-h-11 items-center gap-1 rounded-xl border border-[#dce4ee] px-3 text-sm font-bold text-[#405773]"><Icon name="filter" className="h-4 w-4" />Filter{activeFilters > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff7a00] px-1 text-[10px] text-white">{activeFilters}</span>}</button></div>
       <div className="hidden grid gap-3 md:grid-cols-3 xl:grid-cols-7"><input value={search} onChange={filtersChanged(setSearch)} placeholder="Search project, unit, type, floor" className="focus-ring rounded-lg border px-3 py-2.5 text-sm xl:col-span-2" /><input value={project} onChange={filtersChanged(setProject)} placeholder="Project" className="focus-ring rounded-lg border px-3 py-2.5 text-sm" /><input value={propertyType} onChange={filtersChanged(setPropertyType)} placeholder="Property type" className="focus-ring rounded-lg border px-3 py-2.5 text-sm" /><input value={floor} onChange={filtersChanged(setFloor)} placeholder="Floor" className="focus-ring rounded-lg border px-3 py-2.5 text-sm" /><select value={status} onChange={filtersChanged(setStatus)} className="focus-ring rounded-lg border px-3 py-2.5 text-sm"><option value="">All statuses</option>{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select><input value={bookingDate} onChange={filtersChanged(setBookingDate)} type="date" aria-label="Booking date" className="focus-ring rounded-lg border px-3 py-2.5 text-sm" /></div>
@@ -178,8 +287,11 @@ export function InventoryDashboard({ role }: { role: Role }) {
 }
 
 function Fields({ item, ceo }: { item?: Partial<InventoryItem>; ceo: boolean }) {
-  const fields: Array<[keyof InventoryRow, string, string]> = [["project", "Project", "text"], ["unit_number", "Unit / flat no.", "text"], ["property_type", "Property type", "text"], ["size_sqft", "Size (sq.ft)", "number"], ["floor", "Floor", "text"], ["basic_price", "Basic price", "number"], ...(ceo ? [["landing", "Landing", "number"] as [keyof InventoryRow, string, string]] : []), ["booking_date", "Booking date", "date"]];
-  return <>{fields.map(([name, title, type]) => <label key={name} className="block text-sm font-medium text-[#405773]">{title}<input name={name} type={type} required={name !== "booking_date" && name !== "landing"} defaultValue={item?.[name as keyof InventoryItem] ?? ""} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label>)}<label className="block text-sm font-medium text-[#405773]">Status<select name="status" defaultValue={item?.status || "AVAILABLE"} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5">{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label></>;
+  const fields: Array<[keyof InventoryRow, string, string]> = [["project", "Project", "text"], ["unit_number", "Unit / flat no.", "text"], ["property_type", "Property type", "text"], ["size_sqft", "Size (sq.ft)", "number"], ["floor", "Floor", "text"], ["basic_price", "Basic price", "text"], ...(ceo ? [["landing", "Landing", "text"] as [keyof InventoryRow, string, string]] : []), ["booking_date", "Booking date", "date"]];
+  return <>{fields.map(([name, title, type]) => <label key={name} className="block text-sm font-medium text-[#405773]">{title}<input name={name} type={type} 
+  inputMode={name === "basic_price" || name === "landing" ? "decimal" : undefined}
+placeholder={name === "basic_price" || name === "landing" ? "e.g. 34 lakh, 2.5 cr" : undefined}
+ required={name !== "booking_date" && name !== "landing"} defaultValue={item?.[name as keyof InventoryItem] ?? ""} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label>)}<label className="block text-sm font-medium text-[#405773]">Status<select name="status" defaultValue={item?.status || "AVAILABLE"} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5">{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label></>;
 }
 
 function InventoryForm({ item, ceo, close, save }: { item?: InventoryItem; ceo: boolean; close: () => void; save: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -188,6 +300,7 @@ function InventoryForm({ item, ceo, close, save }: { item?: InventoryItem; ceo: 
 
 function BulkForm({ rows, setRows, ceo, close, save }: { rows: InventoryRow[]; setRows: (rows: InventoryRow[]) => void; ceo: boolean; close: () => void; save: (event: FormEvent<HTMLFormElement>) => void }) {
   const update = (index: number, field: keyof InventoryRow, value: string) => setRows(rows.map((row, position) => position === index ? { ...row, [field]: value } : row));
-  const fields: Array<[keyof InventoryRow, string, string]> = [["project", "Project", "text"], ["unit_number", "Unit / flat no.", "text"], ["property_type", "Property type", "text"], ["size_sqft", "Size (sq.ft)", "number"], ["floor", "Floor", "text"], ["basic_price", "Basic price", "number"], ...(ceo ? [["landing", "Landing", "number"] as [keyof InventoryRow, string, string]] : [])];
-  return <Dialog title="Bulk add inventory" close={close}><form onSubmit={save} className="mt-5"><div className="space-y-4">{rows.map((row, index) => <fieldset key={index} className="rounded-2xl border border-[#e2eaf4] p-4"><legend className="px-1 text-sm font-bold text-[#405773]">Item {index + 1}</legend><div className="mt-2 grid gap-3 sm:grid-cols-2">{fields.map(([field, title, type]) => <label key={field} className="text-sm font-medium text-[#405773]">{title}<input required={field !== "landing"} type={type} value={row[field]} onChange={(event) => update(index, field, event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label>)}<label className="text-sm font-medium text-[#405773]">Status<select value={row.status} onChange={(event) => update(index, "status", event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5">{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label><label className="text-sm font-medium text-[#405773]">Booking date<input type="date" value={row.booking_date} onChange={(event) => update(index, "booking_date", event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label></div>{rows.length > 1 && <button type="button" onClick={() => setRows(rows.filter((_, position) => position !== index))} className="focus-ring mt-3 min-h-10 text-sm font-bold text-[#b12938]">Remove item</button>}</fieldset>)}</div><button type="button" onClick={() => setRows([...rows, blankRow()])} className="focus-ring mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#0869d8] px-4 text-sm font-bold text-[#0869d8]"><Icon name="plus" className="h-4 w-4" />Add another item</button><div className="mt-5 flex justify-end gap-3"><button type="button" onClick={close} className="focus-ring min-h-11 rounded-xl px-4 text-sm font-semibold text-[#60708a]">Cancel</button><button className="focus-ring min-h-11 rounded-xl bg-[#0869d8] px-4 text-sm font-semibold text-white">Create {rows.length} item{rows.length === 1 ? "" : "s"}</button></div></form></Dialog>;
+  const fields: Array<[keyof InventoryRow, string, string]> = [["project", "Project", "text"], ["unit_number", "Unit / flat no.", "text"], ["property_type", "Property type", "text"], ["size_sqft", "Size (sq.ft)", "number"], ["floor", "Floor", "text"], ["basic_price", "Basic price", "text"], ...(ceo ? [["landing", "Landing", "text"] as [keyof InventoryRow, string, string]] : [])];
+  return <Dialog title="Bulk add inventory" close={close}><form onSubmit={save} className="mt-5"><div className="space-y-4">{rows.map((row, index) => <fieldset key={index} className="rounded-2xl border border-[#e2eaf4] p-4"><legend className="px-1 text-sm font-bold text-[#405773]">Item {index + 1}</legend><div className="mt-2 grid gap-3 sm:grid-cols-2">{fields.map(([field, title, type]) => <label key={field} className="text-sm font-medium text-[#405773]">{title}<input required={field !== "landing"} type={type} inputMode={field === "basic_price" || field === "landing" ? "decimal" : undefined}
+placeholder={field === "basic_price" || field === "landing" ? "e.g. 34 lakh, 2.5 cr" : undefined} value={row[field]} onChange={(event) => update(index, field, event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label>)}<label className="text-sm font-medium text-[#405773]">Status<select value={row.status} onChange={(event) => update(index, "status", event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] bg-white px-3 py-2.5">{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label><label className="text-sm font-medium text-[#405773]">Booking date<input type="date" value={row.booking_date} onChange={(event) => update(index, "booking_date", event.target.value)} className="focus-ring mt-1 w-full rounded-xl border border-[#dce4ee] px-3 py-2.5" /></label></div>{rows.length > 1 && <button type="button" onClick={() => setRows(rows.filter((_, position) => position !== index))} className="focus-ring mt-3 min-h-10 text-sm font-bold text-[#b12938]">Remove item</button>}</fieldset>)}</div><button type="button" onClick={() => setRows([...rows, blankRow()])} className="focus-ring mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#0869d8] px-4 text-sm font-bold text-[#0869d8]"><Icon name="plus" className="h-4 w-4" />Add another item</button><div className="mt-5 flex justify-end gap-3"><button type="button" onClick={close} className="focus-ring min-h-11 rounded-xl px-4 text-sm font-semibold text-[#60708a]">Cancel</button><button className="focus-ring min-h-11 rounded-xl bg-[#0869d8] px-4 text-sm font-semibold text-white">Create {rows.length} item{rows.length === 1 ? "" : "s"}</button></div></form></Dialog>;
 }
