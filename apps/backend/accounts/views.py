@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 from .authentication import ActiveEmployeeTokenRefreshSerializer
+from .models import User
 from .permissions import IsCEO
 
 
@@ -22,7 +23,10 @@ class MeView(APIView):
             "id": request.user.id,
             "username": request.user.username,
             "email": request.user.email,
-            "role": request.user.role,
+            # The browser role also controls navigation visibility. A Django
+            # superuser is an Accounts Super Admin even if its legacy CRM role
+            # field was never changed from EMPLOYEE.
+            "role": User.Role.CEO if request.user.is_superuser else request.user.role,
         })
         
 

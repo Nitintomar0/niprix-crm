@@ -415,7 +415,7 @@ const saveCurrentLeadsListState = useCallback(() => {
           <label className="relative min-w-0 flex-1"><span className="sr-only">Search leads</span><Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#75869b]" /><input value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} placeholder="Search leads" className="focus-ring w-full rounded-xl border border-[#dce4ee] py-2.5 pl-9 pr-3 text-sm" /></label>
           <button onClick={() => setFiltersOpen(true)} className="focus-ring relative inline-flex min-h-11 items-center gap-1 rounded-xl border border-[#dce4ee] px-3 text-sm font-semibold text-[#405773]"><Icon name="filter" className="h-4 w-4" />Filter{activeFilterCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff7a00] px-1 text-[10px] text-white">{activeFilterCount}</span>}</button>
         </div>
-        <div className="hidden grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="hidden gap-3 md:grid md:grid-cols-3 xl:grid-cols-6">
           <input
             value={search}
             onChange={(event) => {

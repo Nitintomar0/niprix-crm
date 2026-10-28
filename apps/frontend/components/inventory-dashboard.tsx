@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { AppDialog } from "@/components/app-dialog";
 import { api } from "@/lib/api";
@@ -87,6 +88,7 @@ function InventoryBadge({ value }: { value: InventoryStatus }) {
 }
 
 export function InventoryDashboard({ role }: { role: Role }) {
+  const searchParams = useSearchParams();
   const ceo = role === "CEO";
   const initialQuery = "page=1&page_size=25";
   const cachedList = api.peekInventory(initialQuery);
@@ -95,7 +97,7 @@ export function InventoryDashboard({ role }: { role: Role }) {
   const [summary, setSummary] = useState<InventorySummary | null>(() => cachedSummary ?? null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(() => cachedList?.count ?? 0);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
   const [status, setStatus] = useState("");
   const [project, setProject] = useState("");
   const [propertyType, setPropertyType] = useState("");

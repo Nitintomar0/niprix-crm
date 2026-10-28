@@ -33,6 +33,13 @@ from raw_data.views import (
     RawDataDistributionPreviewView, RawDataDistributionView, RawDataEligibleEmployeesView,
     RawDataPreviewView, RawDataSavePreviewView, RawDataSummaryView, RawLeadDetailView, RawLeadListCreateView,
 )
+from accounts_ledger.views import (
+    CustomerLedgerDetailView,
+    CustomerLedgerListCreateView,
+    IssueReceiptView,
+    ReceiptCancelView,
+    ReceiptPDFView,
+)
 
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -47,6 +54,7 @@ from accounts.views import (
     MeView,
 )
 from core.views import (
+    GlobalSearchView,
     NotificationListView,
     NotificationMarkAllReadView,
     NotificationReadView,
@@ -68,6 +76,7 @@ urlpatterns = [
     ),
     path("api/auth/me/", MeView.as_view(), name="me"),
     path("api/auth/logout/", LogoutView.as_view(), name="logout"),
+    path("api/global-search/", GlobalSearchView.as_view(), name="global-search"),
     path("api/notifications/", NotificationListView.as_view(), name="notification-list"),
     path("api/notifications/unread-count/", NotificationUnreadCountView.as_view(), name="notification-unread-count"),
     path("api/notifications/mark-all-read/", NotificationMarkAllReadView.as_view(), name="notification-mark-all-read"),
@@ -143,6 +152,11 @@ urlpatterns = [
     path("api/inventory/export/pdf/", InventoryPDFExportView.as_view(), name="inventory-pdf-export"),
     path("api/inventory/bulk/", InventoryBulkCreateView.as_view(), name="inventory-bulk-create"),
     path("api/inventory/<int:pk>/", InventoryDetailView.as_view(), name="inventory-detail"),
+    path("api/accounts/customers/", CustomerLedgerListCreateView.as_view(), name="accounts-customer-list"),
+    path("api/accounts/customers/<int:pk>/", CustomerLedgerDetailView.as_view(), name="accounts-customer-detail"),
+    path("api/accounts/customers/<int:customer_id>/receipts/", IssueReceiptView.as_view(), name="accounts-receipt-issue"),
+    path("api/accounts/receipts/<int:pk>/pdf/", ReceiptPDFView.as_view(), name="accounts-receipt-pdf"),
+    path("api/accounts/receipts/<int:pk>/cancel/", ReceiptCancelView.as_view(), name="accounts-receipt-cancel"),
     path("api/leads/summary/", LeadSummaryView.as_view(), name="lead-summary"),
     path("api/leads/overview-analytics/", LeadOverviewAnalyticsView.as_view(), name="lead-overview-analytics"),
     path("api/site-visits/", SiteVisitListView.as_view(), name="site-visit-list"),

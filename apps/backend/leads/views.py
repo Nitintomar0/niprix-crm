@@ -63,16 +63,32 @@ class ScopedLeadListMixin:
                 raise ValidationError({"search": "Must be 200 characters or fewer."})
             normalized = "".join(character for character in search if character.isdigit())
             query = Q(name__icontains=search) | Q(email__icontains=search) | Q(preferred_location__icontains=search)
+                
+            
+            
             if search.isdigit():
                 from .services import normalize_phone
 
                 query |= Q(pk=int(search))
-                # Keep an ID search exact. A one- or two-digit ID must not
-                # also become a broad phone-number fragment search.
-                query |= Q(normalized_phone=normalize_phone(search))
+                normalized_phone = normalize_phone(search)
+
+                if len(normalized_phone) >= 10:
+                    query |= Q(normalized_phone=normalized_phone)
+                else:
+                    query |= Q(normalized_phone__icontains=normalized_phone)
+
             elif normalized:
                 from .services import normalize_phone
-                query |= Q(normalized_phone__icontains=normalize_phone(search))
+
+                normalized_phone = normalize_phone(search)
+
+                if len(normalized_phone) >= 10:
+                    query |= Q(normalized_phone=normalized_phone)
+                else:
+                    query |= Q(normalized_phone__icontains=normalized_phone)
+
+
+        
             queryset = queryset.filter(query)
         for key, field, valid in (
             ("status", "status", Lead.Status.values), ("temperature", "temperature", Lead.Temperature.values),

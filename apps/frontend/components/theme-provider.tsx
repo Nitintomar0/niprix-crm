@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type Theme = "day" | "night";
 
@@ -32,20 +32,66 @@ function initialTheme(): Theme {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(initialTheme);
+  const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  const setTheme = useCallback((nextTheme: Theme) => {
-    try {
-      window.localStorage.setItem(storageKey, nextTheme);
-    } catch {
-      // The current-session theme still changes when persistence is unavailable.
-    }
-    applyTheme(nextTheme);
-    setThemeState(nextTheme);
-  }, []);
+  
+const setTheme = useCallback((nextTheme: Theme) => {
+  if (typeof window === "undefined" || nextTheme === theme) return;
+
+  const root = document.documentElement;
+  const reducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+
+  if (transitionTimer.current) {
+    clearTimeout(transitionTimer.current);
+    transitionTimer.current = null;
+  }
+
+  root.querySelector(".theme-reveal")?.remove();
+  root.classList.remove("theme-transitioning");
+
+  if (!reducedMotion) {
+    const toggle = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    const rect = toggle?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+
+    const reveal = document.createElement("div");
+    reveal.className = "theme-reveal";
+    reveal.dataset.target = nextTheme;
+    reveal.style.setProperty("--reveal-x", `${x}px`);
+    reveal.style.setProperty("--reveal-y", `${y}px`);
+
+    root.appendChild(reveal);
+    root.classList.add("theme-transitioning");
+  }
+
+  try {
+    window.localStorage.setItem(storageKey, nextTheme);
+  } catch {
+    // The current-session theme still changes when persistence is unavailable.
+  }
+
+  applyTheme(nextTheme);
+  setThemeState(nextTheme);
+
+  if (!reducedMotion) {
+    transitionTimer.current = setTimeout(() => {
+      root.querySelector(".theme-reveal")?.remove();
+      root.classList.remove("theme-transitioning");
+      transitionTimer.current = null;
+    }, 950);
+  }
+}, [theme]);
+
 
   const value = useMemo(() => ({
     theme,

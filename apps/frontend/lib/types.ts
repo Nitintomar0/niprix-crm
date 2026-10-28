@@ -48,6 +48,9 @@ export interface LeadSource { id: number; source: LeadSourceKind; external_lead_
 export interface LeadAssignment { id: number; previous_assignee: number | null; previous_assignee_detail: EmployeeReference | null; assigned_to: number; assigned_to_detail: EmployeeReference; assigned_by: number | null; assigned_by_name: string; assignment_type: string; reason: string; created_at: string; }
 export interface RawLead { id: number; name: string; phone: string; alternate_phone: string; email: string; property_type: string; preferred_location: string; budget_minimum: string | null; budget_maximum: string | null; bhk: string; purpose: string; requirement_notes: string; source: LeadSourceKind; source_details: string; created_at: string; updated_at: string; }
 export interface RawDataSummary { total: number; available: number; }
+export interface GlobalSearchItem { id: number; title: string; detail: string; }
+export interface GlobalSearchResults { leads: GlobalSearchItem[]; lead_recovery: GlobalSearchItem[]; follow_ups: GlobalSearchItem[]; raw_data: GlobalSearchItem[]; inventory: GlobalSearchItem[]; }
+export interface GlobalSearchResponse { query: string; results: GlobalSearchResults; }
 export interface RawPreviewRow { row_number: number; valid: boolean; errors: string[]; normalized_phone?: string; name: string; phone: string; alternate_phone: string; email: string; property_type: string; preferred_location: string; budget_minimum: string; budget_maximum: string; bhk: string; purpose: string; requirement_notes: string; source: LeadSourceKind; source_details: string; }
 export interface RawPreview { rows: RawPreviewRow[]; summary: { total: number; valid: number; invalid: number; duplicates: number; }; }
 export interface RawEligibleEmployee { id: number; username: string; employee_code: string; branch: number; }
@@ -55,6 +58,12 @@ export interface RawDistributionPreview { raw_lead_ids: number[]; total: number;
 export type InventoryStatus = "AVAILABLE" | "HOLD" | "BOOKED" | "SOLD" | "BLOCKED" | "RESERVED";
 export interface InventoryItem { id: number; project: string; unit_number: string; property_type: string; size_sqft: string; floor: string; basic_price: string; landing?: string | null; status: InventoryStatus; booking_date: string | null; created_at: string; updated_at: string; }
 export interface InventorySummary { total: number; available: number; hold: number; booked: number; sold: number; landing_total?: string; }
+export type CustomerLedgerStatus = "ACTIVE" | "CLOSED" | "ON_HOLD";
+export type PaymentMethod = "CASH" | "CHEQUE" | "DRAFT" | "TRANSFER" | "UPI";
+export type ReceiptStatus = "ISSUED" | "CANCELLED";
+export interface IssuedReceipt { id: number; serial_number: string; receipt_date: string; amount_received: string; total_amount: string; balance_amount: string; payment_method: PaymentMethod; reference_number: string; drawn_on: string; status: ReceiptStatus; issued_at: string; cancelled_at: string | null; cancellation_reason: string; receipt_pdf_url: string; }
+export interface LedgerPayment { id: number; amount: string; payment_method: PaymentMethod; reference_number: string; drawn_on: string; paid_on: string; status: "SUCCESS" | "REVERSED"; reversed_at: string | null; reversal_reason: string; created_at: string; receipt: IssuedReceipt; }
+export interface CustomerLedger { id: number; customer_id: string; name: string; mobile: string; residential_address: string; project: string; plot_number: string; plot_size: string; total_agreed_amount: string; total_received: string; outstanding_balance: string; due_date: string | null; status: CustomerLedgerStatus; payments: LedgerPayment[]; receipts: IssuedReceipt[]; created_at: string; updated_at: string; }
 export type IntegrationProvider = "MAGICBRICKS" | "WHATSAPP" | "FACEBOOK" | "INSTAGRAM" | "WEBSITE";
 export interface IntegrationConfiguration { id: number; provider: IntegrationProvider; branch: number; external_account_id: string; is_enabled: boolean; status: "NOT_CONNECTED" | "CONFIGURED" | "ERROR"; secret_configured: boolean; last_success_at: string | null; last_failure_at: string | null; last_failure_message: string; failed_event_count: number; created_at: string; updated_at: string; }
 export interface IntegrationEvent { id: number; provider: IntegrationProvider; event_type: string; external_event_id: string; external_lead_id: string; lead_id: number | null; status: string; received_at: string; processed_at: string | null; retry_count: number; error_message: string; }

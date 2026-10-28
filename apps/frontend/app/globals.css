@@ -1011,3 +1011,76 @@ html[data-theme="night"] .niprix-loader {
 }
 html[data-theme="night"] .niprix-loader-card,
 html[data-theme="night"] .niprix-loader-panel { background-color: var(--surface) !important; border-color: var(--line) !important; }
+
+
+
+/* Lead details header — day mode */
+.lead-detail-header {
+  background: linear-gradient(135deg, #ffffff 0%, #f2f8ff 100%);
+  border-color: #dfe8f3;
+}
+
+/* Lead details header — night mode */
+:root[data-theme="night"] .lead-detail-header {
+  background: linear-gradient(135deg, #171a20 0%, #1d222b 100%);
+  border-color: #303743;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-theme="night"] .lead-detail-header h1 {
+  color: #f3f4f6;
+}
+
+:root[data-theme="night"] .lead-detail-header p {
+  color: #aab2bf;
+}
+
+:root[data-theme="night"] .lead-detail-header a[href="/leads"] {
+  color: #d6b66f;
+}
+
+:root[data-theme="night"] .lead-detail-header button:not(:has(svg)),
+:root[data-theme="night"] .lead-detail-header button {
+  color: #e8ebf0;
+}
+
+:root[data-theme="night"] .lead-detail-header button[class*="bg-white"] {
+  background-color: #202630;
+  border-color: #3a4350;
+}
+
+:root[data-theme="night"] .lead-detail-header button[class*="bg-[#eef6ff]"] {
+  background-color: #202b3a;
+  border-color: #354b66;
+  color: #a9ceff;
+}
+
+:root[data-theme="night"] .lead-detail-header button[class*="border-rose"] {
+  background-color: #2b1b20;
+  border-color: #71343e;
+  color: #ff9aa8;
+}
+
+
+
+/* Reference-style elliptical day/night reveal */
+.theme-reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+  pointer-events: none;
+  background: #000;
+  clip-path: ellipse(0px 0px at var(--reveal-x, 50%) var(--reveal-y, 50%));
+  will-change: clip-path;
+}
+
+.theme-reveal[data-target="day"] {
+  background: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-reveal {
+    display: none !important;
+  }
+}
+

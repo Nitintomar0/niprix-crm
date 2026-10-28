@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "raw_data",
     "integrations",
     "inventory",
+    "accounts_ledger",
     "hrms",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { AppDialog } from "@/components/app-dialog";
 import { api } from "@/lib/api";
@@ -28,6 +29,7 @@ function RawLeadFields({ lead }: { lead?: RawLead }) {
 }
 
 export function RawDataDashboard({ role }: { role: Role }) {
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<RawLead[]>([]);
   const [total, setTotal] = useState(0);
   const [available, setAvailable] = useState(0);
@@ -35,7 +37,7 @@ export function RawDataDashboard({ role }: { role: Role }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [people, setPeople] = useState<RawEligibleEmployee[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
   const [location, setLocation] = useState("");
   const [propertyType, setPropertyType] = useState("");
   const [source, setSource] = useState("");

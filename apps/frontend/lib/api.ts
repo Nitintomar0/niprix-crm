@@ -32,11 +32,14 @@ import {
   type LiveLocation,
   type InventoryItem,
   type InventorySummary,
+  type CustomerLedger,
+  type IssuedReceipt,
   type RawLead,
   type RawDataSummary,
   type RawPreview,
   type RawEligibleEmployee,
   type RawDistributionPreview,
+  type GlobalSearchResponse,
 } from "@/lib/types";
 
 const TOKEN_KEY = "niprix.auth.tokens";
@@ -78,10 +81,11 @@ function invalidatePaths(prefixes: string[]) {
 }
 
 function invalidateForMutation(path: string) {
-  if (path.startsWith("/api/inventory/")) return invalidatePaths(["/api/inventory/"]);
-  if (path.startsWith("/api/leads/")) return invalidatePaths(["/api/leads/", "/api/site-visits/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
-  if (path.startsWith("/api/follow-ups/") || path.startsWith("/api/tasks/")) return invalidatePaths(["/api/follow-ups/", "/api/tasks/", "/api/site-visits/", "/api/workspace/summary/", "/api/leads/", "/api/employees/", "/api/notifications/"]);
-  if (path.startsWith("/api/raw-data/")) return invalidatePaths(["/api/raw-data/", "/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/inventory/")) return invalidatePaths(["/api/global-search/", "/api/inventory/"]);
+  if (path.startsWith("/api/accounts/")) return invalidatePaths(["/api/accounts/"]);
+  if (path.startsWith("/api/leads/")) return invalidatePaths(["/api/global-search/", "/api/leads/", "/api/site-visits/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/follow-ups/") || path.startsWith("/api/tasks/")) return invalidatePaths(["/api/global-search/", "/api/follow-ups/", "/api/tasks/", "/api/site-visits/", "/api/workspace/summary/", "/api/leads/", "/api/employees/", "/api/notifications/"]);
+  if (path.startsWith("/api/raw-data/")) return invalidatePaths(["/api/global-search/", "/api/raw-data/", "/api/leads/", "/api/workspace/summary/", "/api/employees/", "/api/notifications/"]);
   if (path.startsWith("/api/attendance/")) return invalidatePaths(["/api/attendance/", "/api/employees/", "/api/hrms/dashboard/"]);
   if (path.startsWith("/api/employees/")) return invalidatePaths(["/api/employees/", "/api/hrms/", "/api/attendance/", "/api/leads/", "/api/workspace/"]);
   if (path.startsWith("/api/hrms/")) return invalidatePaths(["/api/hrms/", "/api/employees/"]);
@@ -365,6 +369,7 @@ export const api = {
     return response.json() as Promise<Tokens>;
   },
   me: () => request<User>("/api/auth/me/"),
+  globalSearch: (query: string, signal?: AbortSignal) => request<GlobalSearchResponse>(`/api/global-search/?q=${encodeURIComponent(query)}&limit=5`, { signal }),
   notifications: (page = 1) => cachedGet<Paginated<Notification>>(`/api/notifications/?page=${page}&page_size=20`, 5_000),
   notificationUnreadCount: () => cachedGet<{ count: number }>("/api/notifications/unread-count/", 5_000),
   markNotificationRead: (id: number) => request<Notification>(`/api/notifications/${id}/read/`, { method: "POST", body: "{}" }),
@@ -487,6 +492,13 @@ primeLeadFromList: (lead: Lead) => primeLeadFromList(lead),
   bulkCreateInventory: (items: Record<string, unknown>[]) => request<InventoryItem[]>("/api/inventory/bulk/", { method: "POST", body: JSON.stringify({ items }) }),
   updateInventory: (id: number, body: Record<string, unknown>) => request<InventoryItem>(`/api/inventory/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteInventory: (id: number) => request<void>(`/api/inventory/${id}/`, { method: "DELETE" }),
+  accountCustomers: (query = "") => cachedGet<Paginated<CustomerLedger>>(`/api/accounts/customers/?${query}`, 5_000),
+  accountCustomer: (id: number) => cachedGet<CustomerLedger>(`/api/accounts/customers/${id}/`, 5_000),
+  createAccountCustomer: (body: Record<string, unknown>) => request<CustomerLedger>("/api/accounts/customers/", { method: "POST", body: JSON.stringify(body) }),
+  updateAccountCustomer: (id: number, body: Record<string, unknown>) => request<CustomerLedger>(`/api/accounts/customers/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
+  issueAccountReceipt: (customerId: number, body: { serial_number: string; receipt_date: string; amount: string; payment_method: string; reference_number: string; drawn_on: string; idempotency_key: string }) => request<IssuedReceipt>(`/api/accounts/customers/${customerId}/receipts/`, { method: "POST", body: JSON.stringify(body) }),
+  downloadAccountReceipt: (id: number) => requestBlob(`/api/accounts/receipts/${id}/pdf/`),
+  cancelAccountReceipt: (id: number, reason: string) => request<IssuedReceipt>(`/api/accounts/receipts/${id}/cancel/`, { method: "POST", body: JSON.stringify({ reason }) }),
   integrations: () => cachedGet<Paginated<IntegrationConfiguration>>("/api/integrations/?page=1&page_size=100", 15_000),
   createIntegration: (body: Pick<IntegrationConfiguration, "provider" | "branch" | "external_account_id" | "is_enabled">) => request<IntegrationConfiguration>("/api/integrations/", { method: "POST", body: JSON.stringify(body) }),
   updateIntegration: (id: number, body: Partial<Pick<IntegrationConfiguration, "branch" | "external_account_id" | "is_enabled">>) => request<IntegrationConfiguration>(`/api/integrations/${id}/`, { method: "PATCH", body: JSON.stringify(body) }),
